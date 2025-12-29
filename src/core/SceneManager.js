@@ -9,6 +9,7 @@ import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
 import { ControlPanel } from "../ui/ControlPanel.js";
+import { SimControls } from "../ui/SimControls.js";
 import { CombustionShader } from "../effects/FlameShader.js";
 import { Nacelle } from "../components/Nacelle.js";
 
@@ -18,13 +19,18 @@ export class SceneManager {
     console.log("EngineFactory Import:", EngineFactory);
     this.container = container;
 
+    // 0. Scene Setup (Must be first)
+    this.scene = new THREE.Scene();
+    this.scene.background = new THREE.Color(0x050505);
+
     /* ... */
     // 1. Physics Engine
     this.physics = new PhysicsEngine();
     this.physics.inputs.throttle = 20.0;
 
-    // 2. Visual Effects (Particles & Flames)
-    this.particles = new ParticleSystem(1500);
+    // 2. Visual Effects (Particle Flow)
+    this.particleSystem = new ParticleSystem(20000); // Dense particles
+    this.scene.add(this.particleSystem);
 
     // Flame Setup
     this.flames = [];
@@ -66,8 +72,7 @@ export class SceneManager {
     this.flameMesh.name = "CombustionFlames";
 
     // 3. Scene & Camera
-    this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x050505);
+    // Scene initialized at top
     this.camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
     this.camera.position.set(10, 5, 15);
 
@@ -122,7 +127,8 @@ export class SceneManager {
     this.physics.design.cpr = 12.0;
 
     this.scene.add(this.flameMesh);
-    this.scene.add(this.particles);
+    this.scene.add(this.flameMesh);
+    // this.scene.add(this.particles); // Removed
 
     const centerX = this.engine.totalLength ? this.engine.totalLength / 2 : 2.0;
     this.controls.target.set(centerX, 0, 0);
@@ -130,13 +136,19 @@ export class SceneManager {
 
     // 9. Managers
     this.viewManager = new ViewManager(this.engine, this.renderer, this.physics);
-    this.viewManager.addAuxiliary(this.particles);
+    this.viewManager.addAuxiliary(this.particleSystem);
     this.viewManager.addAuxiliary(this.flameMesh);
 
     this.interactionManager = new InteractionManager(this.camera, this.renderer);
     this.interactionManager.setInteractables(this.engine.children);
     this.interactionManager.setViewManager(this.viewManager);
     this.interactionManager.setFocusHandler((obj) => this.focusCamera(obj));
+
+    // NEW: Manual Sim Controls (Air/Fuel/Ignition)
+    this.simState = { airflow: false, fuel: false, ignition: false };
+    this.simControls = new SimControls(this.container, (state) => {
+      this.simState = state;
+    });
 
     this.controlPanel = new ControlPanel(this.physics, this);
     this.interactionManager.setControlPanel(this.controlPanel);
@@ -200,11 +212,18 @@ export class SceneManager {
     //   this.ui.thrustVal.innerText = thrustKN.toFixed(2) + ' kN';
     // }
 
-    // Update Particles
-    if (this.particles) this.particles.update(dt, currentRPM, this.physics);
+    // Update Particle System
+    if (this.particleSystem) {
+      const state = this.simState || { airflow: true, fuel: true, ignition: true };
+      this.particleSystem.update(dt, currentRPM, this.physics, state);
+    }
 
     // Update Flame Shader
     if (this.flameMat) {
+      if (this.simState && this.flameMesh) {
+        // Ignition requires Fuel + Spark
+        this.flameMesh.visible = this.simState.fuel && this.simState.ignition;
+      }
       this.flameMat.uniforms.uTime.value += dt;
       this.flameMat.uniforms.uThrottle.value = this.physics.state.rpm / 100.0;
 
@@ -295,7 +314,7 @@ export class SceneManager {
         }
 
         if (typeof obj.update === "function") {
-          obj.update(dt);
+          obj.update(dt, this.physics);
         }
       });
     }

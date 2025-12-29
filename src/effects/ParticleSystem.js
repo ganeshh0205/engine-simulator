@@ -1,38 +1,34 @@
 import * as THREE from "three";
 
 export class ParticleSystem extends THREE.Points {
-    constructor(count = 1000) {
+    constructor(count = 10000) {
         const geometry = new THREE.BufferGeometry();
         const positions = new Float32Array(count * 3);
         const colors = new Float32Array(count * 3);
-        const velocities = new Float32Array(count); // Random speed variance
-        const radiuses = new Float32Array(count);   // Radial offset
+        const velocities = new Float32Array(count);
+        const radFactors = new Float32Array(count);   // 0.0 to 1.0 relative to flow channel
 
-        const engineLength = 25.0; // Extended length for exhaust plume (Engine is ~11.0)
+        const engineLength = 25.0;
 
         for (let i = 0; i < count; i++) {
-            // Start randomly along the length to fill it initially
             const x = Math.random() * engineLength;
 
-            // Random radius within flow path (Avoid Nacelle clipping)
-            // Intake radius is ~0.9. Nacelle starts at 1.0.
-            // Keep particles inside 0.85 to be safe.
-            const r = Math.random() * 0.85;
-            const theme = Math.random() * Math.PI * 2;
+            // Initial Random Factors
+            radFactors[i] = Math.random();
+            const theta = Math.random() * Math.PI * 2;
 
-            // Position
+            // Initial Position
             positions[i * 3] = x;
-            positions[i * 3 + 1] = Math.cos(theme) * r;
-            positions[i * 3 + 2] = Math.sin(theme) * r;
+            // Initialize Y/Z so theta can be recovered in update()
+            const initialR = 1.0;
+            positions[i * 3 + 1] = Math.cos(theta) * initialR;
+            positions[i * 3 + 2] = Math.sin(theta) * initialR;
 
-            // Store params
-            velocities[i] = 1.0 + Math.random() * 0.5; // Base speed variance
-            radiuses[i] = r;
+            velocities[i] = 1.0 + Math.random() * 0.5;
 
-            // Initial Color
             colors[i * 3] = 0;
-            colors[i * 3 + 1] = 0;
-            colors[i * 3 + 2] = 1; // Blue
+            colors[i * 3 + 1] = 0.5; // Cyanish
+            colors[i * 3 + 2] = 1;
         }
 
         geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
@@ -40,12 +36,12 @@ export class ParticleSystem extends THREE.Points {
 
         const material = new THREE.PointsMaterial({
             color: 0xffffff,
-            size: 0.05,
+            size: 0.06, // Smaller but visible
             vertexColors: true,
             transparent: true,
-            opacity: 0.6,
+            opacity: 0.5, // Balanced opacity
             blending: THREE.AdditiveBlending,
-            depthWrite: false, // Don't block other transparent objects
+            depthWrite: false,
         });
 
         super(geometry, material);
@@ -53,139 +49,260 @@ export class ParticleSystem extends THREE.Points {
         this.name = "AirflowParticles";
         this.count = count;
         this.velocities = velocities;
-        this.radiuses = radiuses;
+        this.radFactors = radFactors;
         this.engineLength = engineLength;
+
+        // ... (Landmarks remain same) ...
+        this.landmarks = {
+            intake: 1.1,
+            lpcEnd: 3.1,
+            transEnd: 3.6,
+            compressorEnd: 6.1,
+            diffuserEnd: 6.6,
+            combustorEnd: 8.9,
+            turbineEnd: 12.1, // Adjusted for Extended Turbine (8.9 + 3.2)
+            nozzleEnd: 14.1 // Adjusted for Nozzle (12.1 + 2.0)
+        };
     }
 
-    update(dt, rpm, physics) {
+    getFlowBounds(x) {
+        // Return [innerRadius, outerRadius]
+        // MARGIN: 0.03 visual safety margin to prevent wall clipping
+        const margin = 0.03;
+        const outerLimit = (r) => r - margin;
+        const innerLimit = (r) => r + margin;
+
+        const lm = this.landmarks;
+
+        // 1. INTAKE (0.0 -> 1.1)
+        if (x < lm.intake) {
+            // Hub: Spinner (0 -> 0.55) Power 0.4 Profile
+            // Casing: 1.0
+            const localX = x; // Starts at 0 relative to engine
+            if (localX < 0) return [0, 1.0]; // Should not happen
+
+            const t = localX / 1.1;
+            // Intake.js: r = rLPC * t^0.4. rLPC = 0.55.
+            const hub = 0.55 * Math.pow(t, 0.4);
+            return [innerLimit(hub), outerLimit(1.0)];
+        }
+
+        // 2. LPC (1.1 -> 3.1)
+        else if (x < lm.lpcEnd) {
+            // Hub: 0.55 Constant
+            // Casing: 1.0
+            return [innerLimit(0.55), outerLimit(1.0)];
+        }
+
+        // 3. TRANSITION (3.1 -> 3.6)
+        else if (x < lm.transEnd) {
+            // Hub: 0.55 -> 0.82 Linear
+            // Casing: 1.0
+            const t = (x - lm.lpcEnd) / (lm.transEnd - lm.lpcEnd);
+            const hub = 0.55 + (0.82 - 0.55) * t;
+            return [innerLimit(hub), outerLimit(1.0)];
+        }
+
+        // 4. HPC (3.6 -> 6.1)
+        else if (x < lm.compressorEnd) {
+            // Hub: 0.82 Constant
+            // Casing: 1.0
+            return [innerLimit(0.82), outerLimit(1.0)];
+        }
+
+        // 5. DIFFUSER (6.1 -> 6.6)
+        else if (x < lm.diffuserEnd) {
+            // Hub: 0.82 -> 0.45 (Combustor Inner)
+            // Casing: 1.0 -> 0.95 (Combustor Liner Outer)
+            const t = (x - lm.compressorEnd) / (lm.diffuserEnd - lm.compressorEnd);
+            const hub = 0.82 + (0.45 - 0.82) * t;
+            const outer = 1.0 + (0.95 - 1.0) * t;
+            return [innerLimit(hub), outerLimit(outer)];
+        }
+
+        // 6. COMBUSTOR (6.6 -> 8.9)
+        else if (x < lm.combustorEnd) {
+            // Hub: 0.45 Constant
+            // Casing: 0.95 (Liner)
+            return [innerLimit(0.45), outerLimit(0.95)];
+        }
+
+        // 7. TURBINE (8.9 -> 11.3)
+        // Expanding Frustum
+        else if (x < lm.turbineEnd) {
+            const t = (x - lm.combustorEnd) / (lm.turbineEnd - lm.combustorEnd);
+            // Hub: 0.45 -> 0.70
+            // Casing: 1.00 -> 1.55 (Exact Casing)
+            // Particle Limit: Casing - Margin (0.05)
+            // Start: 0.95 (Combustor End) -> 1.50 (Turbine End)
+            // Note: Turbine Casing starts at 1.0, but Combustor Liner is 0.95.
+            // Visually keeping flow continuous 0.95 -> 1.50 is better than jumping to 1.0.
+            const hub = 0.45 + (0.70 - 0.45) * t;
+            const outer = 0.95 + (1.50 - 0.95) * t;
+            return [innerLimit(hub), outerLimit(outer)];
+        }
+
+        // 8. NOZZLE (11.3 -> 13.3)
+        else if (x < lm.nozzleEnd) {
+            const nozzleStart = lm.turbineEnd; // 11.3
+            const nozzleThroat = nozzleStart + 0.8; // 12.1 (40%)
+
+            let outer = 0;
+            let inner = 0;
+
+            if (x < nozzleThroat) {
+                // Segment 1: Inlet (1.50 matches Turbine Exit) -> Throat (1.20)
+                // Casing Throat is 1.25. Margin 0.05 -> 1.20.
+                const t = (x - nozzleStart) / 0.8;
+                outer = 1.50 + (1.20 - 1.50) * t;
+
+                // Hub: Linear Cone 0.7 -> 0.0 (Overall)
+                const tGlobal = (x - nozzleStart) / 2.0;
+                inner = 0.7 * (1.0 - tGlobal);
+            } else {
+                // Segment 2: Throat (1.20) -> Exit (0.90)
+                // Casing Exit is 0.95. Margin 0.05 -> 0.90.
+                const t = (x - nozzleThroat) / (lm.nozzleEnd - nozzleThroat);
+                outer = 1.20 + (0.90 - 1.20) * t;
+
+                const tGlobal = (x - nozzleStart) / 2.0;
+                inner = 0.7 * (1.0 - tGlobal);
+            }
+
+            // Note: We already applied margins in the variables above (1.50 vs 1.55).
+            // So we return them DIRECTLY without adding margin AGAIN.
+            // Inner already matches Hub (0.7). Add 0.03 margin to avoid surface z-fight?
+            return [inner + 0.03, outer];
+        }
+
+        // 9. EXHAUST (Diverging Plume)
+        else {
+            // User requested "diverge out" after exiting.
+            // Start at Nozzle Exit radius (0.90) and expand.
+            const dist = x - lm.nozzleEnd;
+            const spread = dist * 0.15; // 15% slope expansion
+
+            return [0.0, 0.90 + spread];
+        }
+    }
+
+    update(dt, rpm, physics, simState) {
+        // ... (SimState visibility check) ...
+        if (simState) {
+            this.visible = simState.airflow;
+            if (!this.visible) return;
+        } else {
+            this.visible = true;
+        }
+
         const positions = this.geometry.attributes.position.array;
         const colors = this.geometry.attributes.color.array;
-
-        // Default to idle values if physics not ready
         const stations = physics ? physics.stations : null;
+        const lm = this.landmarks;
 
-        // Helper to get T/P at x
-        // Simplified Linear Mapping:
-        // x=0 (Amb) -> x=1 (Inlet, Stn2) -> x=4.5 (CompExit, Stn3) 
-        // -> x=5.5 (Combustor, Stn4) -> x=6.5 (TurbineExit, Stn5) -> x=8 (NozzleExit, Stn8)
+        // Dimming Factor to prevent Supernova
+        const intensity = 0.7;
 
         for (let i = 0; i < this.count; i++) {
+            // ... (Physics movement logic remains same) ...
             const idx = i * 3;
+            // 1. Move Axially First
             let x = positions[idx];
 
-            let velocity = 0;
-            let temp = 288;
-
-            if (stations) {
-                // --------------------------
-                // COMPLEX AIRFLOW LOGIC
-                // --------------------------
-
-                // 1. Intake & Compressor (0 - 4.6)
-                if (x < 4.6) {
-                    // Determine zone
-                    if (x < 1.1) {
-                        velocity = 15.0 + (rpm / 100) * 40.0;
-                        temp = stations[2].T;
-                    } else {
-                        velocity = 10.0 + (rpm / 100) * 20.0;
-                        const t = (x - 1.1) / 3.5;
-                        temp = stations[2].T + (stations[3].T - stations[2].T) * t;
-                    }
-
-                    // Spiral motion in compressor?
-                    // radius is constant/tapers slightly
-                }
-                // 2. COMBUSTOR (4.6 - 6.6)
-                else if (x < 6.6) {
-                    // CRITICAL VISUAL: Flow Split
-                    // Core Burn (Inside Liner, r < 0.7) vs Bypass/Cooling (Outside Liner, r > 0.7)
-                    // We assign a "path" based on particle index or random radius?
-                    // Let's rely on radius[i].
-
-                    const r = this.radiuses[i];
-                    const isCore = r < 0.65; // Inner Liner
-
-                    if (isCore) {
-                        // Inside Flame Tube -> COMBUSTION
-                        velocity = 20.0 + (rpm / 100) * 40.0;
-                        temp = stations[4].T; // HOT! (Red)
-                    } else {
-                        // Outside Liner -> BYPASS / COOLING AIR
-                        velocity = 25.0 + (rpm / 100) * 45.0; // Faster, less obstruction
-                        temp = stations[3].T; // COLD! (Stays Blue/Cyan)
-
-                        // DILUTION HOLE VISUALIZATION
-                        // At x ~ 5.6 (Halfway), some outer particles dive inward to mix
-                        if (x > 5.5 && x < 5.7) {
-                            // Suck inward
-                            this.radiuses[i] *= 0.95; // Shrink radius to join core
-                            // If they crossover, they heat up next frame
-                        }
-                    }
-                }
-                // 3. Turbine (6.6 - 9.0)
-                else if (x < 9.0) {
-                    // Mixed flow
-                    velocity = 30.0 + (rpm / 100) * 50.0;
-                    temp = stations[5].T; // All hot now
-                }
-                // 4. Nozzle (9.0+)
-                else {
-                    const thrustFactor = physics.state.thrust / 5000;
-                    velocity = 50.0 + thrustFactor * 250.0;
-                    temp = stations[8].T;
-                }
+            // Calculate Velocity based on previous position (approx is fine)
+            let velocity = 5.0;
+            let temp = 300;
+            if (x < lm.intake) {
+                velocity = 15 + (rpm / 1000) * 5;
+                temp = stations ? stations[2].T : 288;
+            } else if (x < lm.compressorEnd) {
+                velocity = 12 + (rpm / 1000) * 10;
+                const t = (x - lm.intake) / (lm.compressorEnd - lm.intake);
+                if (stations) temp = stations[2].T + (stations[3].T - stations[2].T) * t;
+            } else if (x < lm.combustorEnd) {
+                velocity = 20 + (rpm / 1000) * 15;
+                if (stations) temp = stations[4].T;
+            } else if (x < lm.turbineEnd) {
+                velocity = 30 + (rpm / 1000) * 20;
+                if (stations) temp = stations[5].T;
             } else {
-                velocity = 5.0; // Fallback
+                velocity = 50 + (rpm / 1000) * 50;
+                if (stations) temp = stations[8].T;
             }
 
-            // Apply Randomness
-            velocity *= this.velocities[i]; // Inherent variance
+            velocity *= this.velocities[i];
+            x += velocity * 0.1 * dt; // Move
 
-            // Move particle
-            x += velocity * 0.1 * dt; // Scale down for visual scale relative to meters
-
-            // Reset loop
-            if (x > this.engineLength) {
-                x = -2.0; // Start further back to visualize intake suction
-
-                // Reset radius to ensure they enter cleanly
-                this.radiuses[i] = Math.random() * 0.85;
-            }
+            // Wrap around
+            if (x > this.engineLength) x = -2.0;
             positions[idx] = x;
 
-            // Update Color based on Temp
-            // Map Temp (288K -> 1600K) to Color Ramp
-            // Blue(300) -> Cyan(500) -> Yellow(1000) -> Red(1200) -> White(1500+)
+            // 2. Constrain Radius at NEW Position
+            const [minR, maxR] = this.getFlowBounds(x);
+            const r = minR + this.radFactors[i] * (maxR - minR);
 
-            let r = 0, g = 0, b = 1;
+            // 3. Spin
+            const theta = Math.atan2(positions[idx + 2], positions[idx + 1]);
+            let spinSpeed = 0;
+            if (x > lm.intake && x < lm.turbineEnd) spinSpeed = (rpm / 60) * dt * 0.5;
+            const newTheta = theta + spinSpeed;
 
-            if (temp < 400) { // Cold/Ambient
-                // Blue -> Cyan
-                // 300 -> 400
-                const t = Math.min(1, (temp - 288) / 112);
-                r = 0; g = t; b = 1;
-            } else if (temp < 800) { // Compression Warm
-                // Cyan -> Yellow/Orange?
-                // 400 -> 800
-                const t = (temp - 400) / 400;
-                // Cyan (0,1,1) -> (1,1,0) Yellow ?
-                r = t; g = 1; b = 1 - t; // Fade out blue
-            } else if (temp < 1200) { // Hot
-                // Yellow(1,1,0) -> Red(1,0,0)
-                const t = (temp - 800) / 400;
-                r = 1; g = 1 - t; b = 0;
-            } else { // Very Hot (Exhaust/Fire)
-                // Red -> White/Blue center?
-                // 1200 -> 1600+
-                const t = Math.min(1, (temp - 1200) / 400);
-                r = 1; g = t; b = t; // Desaturate to white
+            positions[idx + 1] = Math.cos(newTheta) * r;
+            positions[idx + 2] = Math.sin(newTheta) * r;
+
+            // Color Logic 
+            // Color Logic (Realistic Air/Fuel/Fire)
+            let rC = 0, gC = 0, bC = 0;
+
+            const isCombustor = (x > lm.diffuserEnd && x < lm.combustorEnd);
+            const isTurbine = (x >= lm.combustorEnd);
+
+            // Normalized "Pressure" Color for Air (Non-Combustion)
+            // Range: 0 (Cold) to 1 (Max Compression Heat)
+            let tP = (temp - 288) / 400;
+            if (tP < 0) tP = 0; if (tP > 1) tP = 1;
+
+            // Base Air Color: Cold (Cyan) -> Hot Compression (Deep Blue)
+            // Cold: 0.6, 0.9, 1.0 (Cyan)
+            // Hot Comp: 0.1, 0.3, 0.9 (Blue)
+            rC = 0.6 - 0.5 * tP;
+            gC = 0.9 - 0.6 * tP;
+            bC = 1.0 - 0.1 * tP;
+
+            // Manual Control Overrides
+            if (simState) {
+                const { fuel, ignition } = simState;
+
+                if (isCombustor) {
+                    if (fuel && !ignition) {
+                        // Fuel Mist (White/Grey) - ONLY if Fuel is ON
+                        rC = 0.95; gC = 0.95; bC = 0.95;
+                    } else if (fuel && ignition) {
+                        // Combustion (Bright Orange/Yellow) - REQUIRES both Fuel & Ignition
+                        const p = (x - lm.diffuserEnd) / (lm.combustorEnd - lm.diffuserEnd);
+                        if (p < 0.2) {
+                            // Injection Point: White/Yellow
+                            rC = 1.0; gC = 0.9; bC = 0.6;
+                        } else {
+                            // Main Flame: Orange -> Red
+                            rC = 1.0;
+                            gC = 0.5 * (1.0 - p); // Fades green component
+                            bC = 0.0;
+                        }
+                    }
+                } else if (isTurbine) {
+                    // Exhaust Trail (If Combustion active)
+                    if (fuel && ignition) {
+                        // Fading Orange
+                        rC = 1.0; gC = 0.4; bC = 0.1;
+                    }
+                }
             }
 
-            colors[idx] = r;
-            colors[idx + 1] = g;
-            colors[idx + 2] = b;
+            // Apply Intensity Scaling
+            colors[idx] = rC * intensity;
+            colors[idx + 1] = gC * intensity;
+            colors[idx + 2] = bC * intensity;
         }
 
         this.geometry.attributes.position.needsUpdate = true;

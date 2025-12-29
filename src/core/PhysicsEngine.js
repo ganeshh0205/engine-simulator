@@ -94,23 +94,41 @@ export class PhysicsEngine {
         const { altitude, mach, manualAtmosphere, fuelCV, afr } = this.inputs;
         const { cpr, tit, massFlow, efficiency } = this.design; // tit is now a limit, not driver!
 
+        // DENSITY EFFICIENCY SCALAR
+        // Lower density reduces component efficiency (Reynolds effect), causing EGT to rise.
+        // We use the previously calculated rho0 (or calculate it relative to Sea Level).
+        // Since rho0 isn't calculated yet, we will do it after ambient step.
+        // Base efficiencies:
+        let effComp = efficiency.comp;
+        let effComb = efficiency.comb;
+        let effTurb = efficiency.turb;
+
         // 0. Ambient Conditions
-        let T0, P0;
-        if (manualAtmosphere) {
-            T0 = this.inputs.ambientTemp;
-            P0 = this.inputs.ambientPress;
-        } else {
-            // Standard Atmosphere
-            const altM = altitude * 0.3048;
-            T0 = 288.15 - 0.0065 * altM;
-            if (T0 < 216.65) T0 = 216.65;
-            P0 = 101325 * Math.pow((1 - 0.0000225577 * altM), 5.2559);
-            this.inputs.ambientTemp = T0;
-            this.inputs.ambientPress = P0;
-        }
+        let T0 = this.inputs.ambientTemp;
+        let P0 = this.inputs.ambientPress;
+        // USER REQUEST: Neither T0 NOR P0 should change with Altitude.
+        // Altitude is now purely a "Performance Degradation" factor for the engine, not the inlet.
+        // The previous standard atmosphere calculation for P0 and T0 is removed.
+        // P0 and T0 are now always taken from inputs, effectively making them "manual" for the cycle.
+        // The 'manualAtmosphere' flag might become redundant for T0/P0, but is kept for other potential uses.
+
         let rho0 = P0 / (this.R * T0);
         this.inputs.ambientDensity = rho0;
         this.state.airDensityInlet = rho0;
+
+        // --- ALTITUDE EGT EFFECT ---
+        // Since P0/Rho0 are constant, we must use Altitude DIRECTLY to simulate the "Thin Air" efficiency loss.
+        // We simulate a "Virtual Density Ratio" just for the efficiency curve.
+        const altM = altitude * 0.3048;
+        // Standard Atmosphere Density Model approximation for scalar:
+        const virtualDensityRatio = Math.pow((1 - 0.0000225577 * altM), 4.2559); // Simulating density drop
+
+        const densityRatio = Math.max(0.2, virtualDensityRatio);
+        const effFactor = Math.pow(densityRatio, 0.05); // Subtle curve
+
+        const currentEffComp = effComp * effFactor;
+        const currentEffTurb = effTurb * effFactor;
+
 
         // 2. Intake
         const r = Math.pow(1 + 0.2 * mach * mach, 3.5);
@@ -158,12 +176,12 @@ export class PhysicsEngine {
             P3 = P2 * currentPR;
             // T3 ideal = T2 * PR^((g-1)/g)
             // T3 real = T2 * (1 + (PR^0.286 - 1) / eff)
-            const tempRatio = 1 + (Math.pow(currentPR, 0.286) - 1) / efficiency.comp;
+            const tempRatio = 1 + (Math.pow(currentPR, 0.286) - 1) / currentEffComp;
             T3 = T2 * tempRatio;
         }
 
         // 4. Combustor
-        const P4 = P3 * efficiency.comb * this.inputs.chamberDiffuser;
+        const P4 = P3 * effComb * this.inputs.chamberDiffuser;
         const combustionIntensity = 0.6 + 0.4 * (rpm / 100.0);
 
         // Heat added to CORE mass flow only

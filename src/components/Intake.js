@@ -68,5 +68,41 @@ export class Intake extends THREE.Group {
     mesh.name = "Nacelle";
 
     this.add(mesh);
+
+    /* =======================
+       Venturi Meter (Flow Measurement)
+    ======================= */
+    // Visible constriction inside the intake
+    const venturiLen = length * 0.4;
+    const venturiPos = length * 0.3;
+    const vInR = 1.0;
+    const vThroatR = 0.85; // Constricted
+
+    // Smooth Bezier or simple Lathe
+    const vPoints = [
+      new THREE.Vector2(vInR, 0),
+      new THREE.Vector2(vThroatR, venturiLen / 2),
+      new THREE.Vector2(vInR, venturiLen)
+    ];
+    // Add thickness? No, just a surface usually or a solid ring.
+    // Let's make it a solid ring insert.
+    vPoints.push(new THREE.Vector2(vInR + 0.05, venturiLen));
+    vPoints.push(new THREE.Vector2(vInR + 0.05, 0));
+    vPoints.push(new THREE.Vector2(vInR, 0));
+
+    const venturiGeo = new THREE.LatheGeometry(vPoints, 32);
+    venturiGeo.rotateZ(-Math.PI / 2);
+    venturiGeo.translate(venturiPos + venturiLen / 2, 0, 0); // Center at venturiPos
+
+    const venturiMat = new THREE.MeshStandardMaterial({
+      color: 0x4444aa, // Different color to stand out (Blueish steel)
+      metalness: 0.6,
+      roughness: 0.4,
+      side: THREE.DoubleSide
+    });
+
+    const venturi = new THREE.Mesh(venturiGeo, venturiMat);
+    venturi.name = "VenturiMeter";
+    this.add(venturi);
   }
 }

@@ -51,7 +51,7 @@ export class ControlPanel {
 
         this.toggleBtn.onclick = () => {
             this.visible = !this.visible;
-            this.panel.style.display = this.visible ? "block" : "none";
+            this.panel.style.display = this.visible ? "grid" : "none";
             this.toggleBtn.innerText = this.visible ? "CLOSE CONSOLE" : "OPEN FLIGHT CONSOLE";
         };
 
@@ -77,8 +77,7 @@ export class ControlPanel {
         this.clearUI();
 
         // CSS Grid for Console
-        // this.panel.style.display = "grid"; // Managed by Toggle
-        this.panel.style.display = "grid";
+        this.panel.style.display = this.visible ? "grid" : "none";
         this.panel.style.gridTemplateColumns = "1fr 1fr";
         this.panel.style.gap = "10px";
         this.panel.style.width = "480px"; // Widen mainly
@@ -105,7 +104,7 @@ export class ControlPanel {
         // 1. FLIGHT CONDITIONS
         this.addSectionHeader("FLIGHT COND.");
         this.addSlider("Throttle", "%", 0, 100, this.physics.inputs.throttle, (v) => this.physics.inputs.throttle = v);
-        this.addSlider("Velocity (Mach)", "M", 0, 2.0, this.physics.inputs.mach, (v) => this.physics.inputs.mach = v);
+        this.addSlider("Velocity (Mach)", "M", 0, 3.5, this.physics.inputs.mach, (v) => this.physics.inputs.mach = v); // Updated to 3.5
         this.addSlider("Altitude", "ft", 0, 50000, this.physics.inputs.altitude, (v) => this.physics.inputs.altitude = v);
 
         // 2. INLET MANUAL OVERRIDE
@@ -114,11 +113,11 @@ export class ControlPanel {
         // We'll just assume if they touch P/T sliders, we might switch? Or separate toggle.
         // Let's rely on Physics Auto unless we add inputs.
         // Adding simple Number Inputs for detailed Physics
-        this.addInput("Inlet Press (P0)", "Pa", this.physics.inputs.ambientPress, (v) => {
+        this.p0Input = this.addInput("Inlet Press (P0)", "Pa", this.physics.inputs.ambientPress, (v) => {
             this.physics.inputs.manualAtmosphere = true;
             this.physics.inputs.ambientPress = parseFloat(v);
         });
-        this.addInput("Inlet Temp (T0)", "K", this.physics.inputs.ambientTemp, (v) => {
+        this.t0Input = this.addInput("Inlet Temp (T0)", "K", this.physics.inputs.ambientTemp, (v) => {
             this.physics.inputs.manualAtmosphere = true;
             this.physics.inputs.ambientTemp = parseFloat(v);
         });
@@ -294,20 +293,21 @@ export class ControlPanel {
                 // Real-time update
                 if (selectedObject) {
                     selectedObject.traverse((child) => {
-                        // Check if it's a blade
-                        // Names: "TurbineRotorBlade...", "CompressorBlade...", "Vane..."
-                        if (child.name.includes("Blade") ||
-                            child.name.includes("Vane") ||
-                            child.name.includes("Rotor") // Catch-all for parts in a rotor group?
-                        ) {
+                        // STRICTER CHECK: Only target Blades/Vanes
+                        // Must have specific names or include "Blade"/"Vane"
+                        // AND MUST NOT be a Group or Hub.
+                        const name = child.name || "";
+
+                        // Valid targets: "RotorBlade", "StatorVane", "TurbineBlade..."
+                        const isBlade = name.includes("Blade") || name.includes("Vane");
+
+                        // Invalid targets: "RotorGroup", "MainRotorHub", "StatorStage", "Axle"
+                        const isRestricted = name.includes("Group") || name.includes("Hub") || name.includes("Stage") || name.includes("Axle");
+
+                        if (isBlade && !isRestricted) {
                             if (child.isMesh) {
-                                // Reset then apply? Or just set rotation.y?
-                                // Blades usually rotated on Y or X depending on setup.
-                                // Turbine.js: blade.rotation.y = -0.5 (Angle of attack)
-                                // Let's assume val is degrees, convert to radians.
+                                // Convert deg to rad
                                 const rad = val * (Math.PI / 180);
-                                // We need to know the base rotation? 
-                                // Or just set it. 
                                 child.rotation.y = rad;
                             }
                         }
@@ -525,6 +525,8 @@ export class ControlPanel {
         row.appendChild(lbl);
         row.appendChild(group);
         (this.container || this.panel).appendChild(row);
+
+        return inp;
     }
 
     startUpdateLoop() {
@@ -547,6 +549,11 @@ export class ControlPanel {
                     setTxt("rho-val", s.airDensityInlet ? s.airDensityInlet.toFixed(3) : "1.225");
                     setTxt("p3-val", s.p3 ? (s.p3 / 1000).toFixed(1) : "101.3");
                     setTxt("vjet-val", s.exitVelocity ? s.exitVelocity.toFixed(1) : "0.0");
+
+                    // AUTO-UPDATE INPUTS (If not manual)
+                    if (!this.physics.inputs.manualAtmosphere) {
+                        // User Request: P0 and T0 decoupled from Altitude. No auto-updates.
+                    }
                 } catch (e) {
                     console.error("Panel Update Error:", e);
                 }

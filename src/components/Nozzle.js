@@ -8,9 +8,9 @@ export class Nozzle extends THREE.Group {
 
     this.params = {
       length: params.length || 2.0,
-      inletRadius: params.inletRadius || 1.0, // Match Unified Casing
-      throatRadius: params.throatRadius || 0.55,
-      exitRadius: params.exitRadius || 0.75,
+      inletRadius: params.inletRadius || 1.55, // Match enlarged Turbine exit
+      throatRadius: params.throatRadius || 1.25, // Converging
+      exitRadius: params.exitRadius || 0.95, // Smaller free end
     };
 
     this.build();
@@ -32,12 +32,14 @@ export class Nozzle extends THREE.Group {
     geometry.rotateZ(-Math.PI / 2);
 
     const material = new THREE.MeshStandardMaterial({
-      color: 0x333333, // Inconel / Burnt Metal
-      metalness: 0.9,  // High metalness
-      roughness: 0.6,  // Oxidized surface
+      color: 0xa0a0a0, // Match Standard Casing Grey
+      metalness: 0.5,
+      roughness: 0.4,
       side: THREE.DoubleSide,
-      emissive: 0x000000,
-      emissiveIntensity: 2.0 // Allow high dynamic range for heat glow
+      emissive: 0x000000, // No glow by default
+      emissiveIntensity: 1.0,
+      transparent: false, // Solid Body
+      opacity: 1.0,
     });
 
     const mesh = new THREE.Mesh(geometry, material);
@@ -46,9 +48,9 @@ export class Nozzle extends THREE.Group {
     this.add(mesh);
 
     // Exhaust Cone (Tail Cone)
-    const coneHeight = 2.5; // Long Spike (Blueprint Match)
+    const coneHeight = length; // Match Nozzle Length (2.0)
     const coneGeo = new THREE.ConeGeometry(
-      0.45,   // Base Radius (Match Turbine Hub)
+      0.7,   // Base Radius (Match Turbine Hub)
       coneHeight,
       32
     );

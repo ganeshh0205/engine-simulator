@@ -7,7 +7,7 @@ export class Turbine extends THREE.Group {
     this.name = "Turbine";
 
     this.params = {
-      stageLength: params.stageLength || 1.6,
+      stageLength: params.length || params.stageLength || 1.6, // Prioritize 'length' from Factory
       stageCount: params.stageCount || 3, // 2-Stage Turbine
       hubRadius: params.hubRadius || 0.45, // Standard Hub
       tipRadius: params.tipRadius || 0.92,  // Slightly clearer of casing (1.0)
@@ -25,22 +25,36 @@ export class Turbine extends THREE.Group {
   }
 
   build() {
-    const { stageLength, hubRadius, tipRadius, bladeCount } = this.params;
+    const { stageLength, stageCount, bladeCount, hubRadius } = this.params;
+
+    // Frustum Parameters: Start tight, expand outwards
+    // Entry: Match Combustor (approx 1.0)
+    // Exit: Expand (approx 1.25)
+    // Hub: Constant or shrinking? Constant is easier for now.
+
+    const rStart = 1.0;
+    const rEnd = 1.55; // Increased from 1.25 for wider opening
+
+    // HUB Frustum: Also expand relative to casing
+    const hStart = hubRadius;
+    const hEnd = hubRadius * 1.55; // Expand hub proportionately
 
     this.rotorMat = new THREE.MeshStandardMaterial({
       color: 0x888888, // Lighter alloy
-      metalness: 0.6,  // Reduced from 0.8
-      roughness: 0.4,  // Reduced from 0.5
-      emissive: 0x111111, // Small base emission to prevent total blackout
+      metalness: 0.6,
+      roughness: 0.4,
+      emissive: 0x111111,
       emissiveIntensity: 1.0
     });
 
     /* =======================
-       Shaft / hub
+       Shaft / hub (Now Conical)
     ======================= */
+    // CylinderGeometry(radiusTop, radiusBottom, height, ...)
+    // ROTATED -90 deg Z: Bottom is Left (Start), Top is Right (End)
     const hubGeo = new THREE.CylinderGeometry(
-      hubRadius,
-      hubRadius,
+      hEnd,   // Top (Right/End)
+      hStart, // Bottom (Left/Start)
       stageLength,
       32
     );
@@ -49,116 +63,104 @@ export class Turbine extends THREE.Group {
     hub.position.x = stageLength / 2;
     this.rotorGroup.add(hub);
 
-    /* =======================
-       Rotor blades
-    ======================= */
-    const bladeGeo = generateBlade({
-      height: tipRadius - hubRadius,
-      chord: 0.26,
-      thickness: 0.045,
-      twistDeg: -22, // opposite twist vs compressor
-    });
-
-    // STATORS (Fixed) - Define BEFORE loop
-    // High Temp Stators (Uniform Silver look)
+    // STATORS (Fixed) Material
     const statorMat = new THREE.MeshStandardMaterial({
       color: 0xaaaaaa,
       metalness: 0.4,
       roughness: 0.7
     });
 
-    const statorGeo = generateBlade({
-      height: tipRadius - hubRadius,
-      chord: 0.22,
-      thickness: 0.04,
-      twistDeg: 10,
-    });
-
-    // Multi-stage loop
-    const stageCount = this.params.stageCount || 2;
-    const totalLength = this.params.stageLength;
-    const lengthPerStage = totalLength / stageCount;
+    // Multi-stage loop with Tapering
+    const lengthPerStage = stageLength / stageCount;
 
     for (let s = 0; s < stageCount; s++) {
       const stageOffset = s * lengthPerStage;
 
-      // ROTORS
-      const rotorX = stageOffset + lengthPerStage * 0.3;
+      // Interpolate Tip and Hub Radius for Conic Shape
+      // We evaluate at the MIDDLE of the stage for simplicity
+      const t = (s + 0.5) / stageCount;
+      const currentTipR = rStart + (rEnd - rStart) * t;
+      const currentHubR = hStart + (hEnd - hStart) * t;
 
+      const bladeHeight = currentTipR - currentHubR;
+
+      // 1. ROTOR BLADES (Custom Geo per stage due to height change)
+      const bladeGeo = generateBlade({
+        height: bladeHeight,
+        chord: 0.28 + (s * 0.05), // Blades get wider/larger
+        thickness: 0.045,
+        twistDeg: -22,
+      });
+
+      const rotorX = stageOffset + lengthPerStage * 0.3;
       const stageRotorGroup = new THREE.Group();
-      stageRotorGroup.name = `TurbineRotorStage${s + 1}`; // Named Stage Group
+      stageRotorGroup.name = `TurbineRotorStage${s + 1}`;
       stageRotorGroup.position.set(rotorX, 0, 0);
       this.rotorGroup.add(stageRotorGroup);
 
       for (let i = 0; i < bladeCount; i++) {
         const blade = new THREE.Mesh(bladeGeo, this.rotorMat);
         const theta = (i / bladeCount) * Math.PI * 2;
-
-        // Position relative to Group (local 0,0,0 is rotorX)
-        blade.position.y = Math.cos(theta) * hubRadius;
-        blade.position.z = Math.sin(theta) * hubRadius;
+        // Attach at Current Hub Radius
+        blade.position.y = Math.cos(theta) * currentHubR;
+        blade.position.z = Math.sin(theta) * currentHubR;
         blade.position.x = 0;
-
         blade.rotation.x = theta;
         blade.rotation.y = -0.5;
-
         blade.name = `TurbineRotorBlade_S${s}_${i}`;
         stageRotorGroup.add(blade);
       }
 
-      // STATORS
-      const statorX = stageOffset + lengthPerStage * 0.7;
+      // 2. STATOR VANES (Fixed)
+      // Stators sit slightly aft, interpolate again or approx same?
+      // Let's use same R for simplicity of stage visual
+      const statorGeo = generateBlade({
+        height: bladeHeight, // Approx same height as rotor in same stage
+        chord: 0.24,
+        thickness: 0.04,
+        twistDeg: 10,
+      });
 
+      const statorX = stageOffset + lengthPerStage * 0.7;
       const stageStatorGroup = new THREE.Group();
-      stageStatorGroup.name = `TurbineStatorStage${s + 1}`; // TurbineStatorStage1, 2...
+      stageStatorGroup.name = `TurbineStatorStage${s + 1}`;
       stageStatorGroup.position.set(statorX, 0, 0);
       this.add(stageStatorGroup);
 
       for (let j = 0; j < bladeCount; j++) {
-        // Use 'j' instead of 'i' to avoid conflict if 'i' was used in rotor loop scope (safeguard)
         const vane = new THREE.Mesh(statorGeo, statorMat);
         const theta = (j / bladeCount) * Math.PI * 2;
-
-        // Position relative to Group (local 0,0,0 is statorX)
-        vane.position.y = Math.cos(theta) * hubRadius;
-        vane.position.z = Math.sin(theta) * hubRadius;
+        vane.position.y = Math.cos(theta) * currentHubR;
+        vane.position.z = Math.sin(theta) * currentHubR;
         vane.position.x = 0;
-
         vane.rotation.x = theta;
         vane.rotation.y = 0.5;
-
-        // Name not strictly needed for logic but good for debug
-        vane.name = `Vane_${j}`;
         stageStatorGroup.add(vane);
       }
     }
 
-
-
-    // STATORS logic now integrated into Multi-Stage loop above.
-
     /* =======================
-       Casing (Thick Walled)
+       Casing (Increasing Frustum)
     ======================= */
-    const rIn = 0.93; // Inner flow path
-    const rOut = 1.0; // Standard Outer Skin
-    const casingPoints = [
-      new THREE.Vector2(rIn, 0),
-      new THREE.Vector2(rOut, 0),
-      new THREE.Vector2(rOut, stageLength),
-      new THREE.Vector2(rIn, stageLength),
-      new THREE.Vector2(rIn, 0)
+    // Lathe Profile: Line from (rStart, 0) to (rEnd, Length)
+    const points = [
+      new THREE.Vector2(rStart, 0),
+      new THREE.Vector2(rStart + 0.1, 0), // Thickness
+      new THREE.Vector2(rEnd + 0.1, stageLength),
+      new THREE.Vector2(rEnd, stageLength),
+      new THREE.Vector2(rStart, 0) // Closed loop
     ];
-    const casingGeo = new THREE.LatheGeometry(casingPoints, 64);
 
-    // Unified Casing Material
+    const casingGeo = new THREE.LatheGeometry(points, 64);
+
     const casingMat = new THREE.MeshStandardMaterial({
       color: 0xa0a0a0,
       metalness: 0.5,
       roughness: 0.4,
       transparent: true,
-      opacity: 0.2, // Unified
-      side: THREE.FrontSide, // Solid
+      opacity: 0.3,
+      side: THREE.DoubleSide,
+      depthWrite: false,
     });
 
     const casing = new THREE.Mesh(casingGeo, casingMat);

@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { generateBlade } from "../geometry/BladeGenerator.js";
-import { BladeGenerator } from "../geometry/BladeGenerator.js"; // Ensure we import the class if used, or function
+import { BladeGenerator } from "../geometry/BladeGenerator.js";
 
 export class Compressor extends THREE.Group {
   constructor(params = {}) {
@@ -8,11 +8,11 @@ export class Compressor extends THREE.Group {
     this.name = "Compressor";
 
     this.params = {
-      length: params.length || 3.5, // 4 Stages
+      length: params.length || 3.5,
       casingRadius: params.casingRadius || 1.0,
-      inletHubRadius: 0.45,
+      inletHubRadius: 0.35,
       exitHubRadius: 0.82,
-      stageCount: params.stageCount || 4, // 4 Stages
+      stageCount: params.stageCount || 4,
       bladeColor: 0xcccccc,
       rpm: params.rpm || 6000
     };
@@ -26,22 +26,86 @@ export class Compressor extends THREE.Group {
   }
 
   build() {
-    const { length, casingRadius, inletHubRadius, exitHubRadius, stageCount, bladeColor } = this.params;
-    const spacing = length / stageCount;
+    const { casingRadius, inletHubRadius, exitHubRadius, bladeColor } = this.params;
+
+    // Config
+    const lpcCount = 4;
+    const hpcCount = 10;
+
+    const lpcSpacing = 0.5;
+    const transitionLen = 0.5; // "The curvy is extended into an increasing frustrum"
+    const hpcSpacing = 0.25;
+
+    const lpcSectionLen = lpcCount * lpcSpacing;
+    const hpcSectionLen = hpcCount * hpcSpacing;
+
+    // Total Length
+    const totalLength = lpcSectionLen + transitionLen + hpcSectionLen;
+    this.length = totalLength;
+
+    // Radius Definition
+    const rLPC = 0.55; // Increased from 0.35 ("not so small")
+    const rHPC = 0.82; // Large cylinder
 
     // ===========================
-    // 1. CASING (Thick Wall)
+    // 1. ROTATING HUB (Complex Shape)
     // ===========================
-    const wallThickness = 0.07;
-    const outerR = casingRadius + wallThickness;
+    // Points for Lathe: [Spinner] -> [LPC Cylinder] -> [Transition] -> [HPC Cylinder]
+    const hubPoints = [];
+
+    // A. Spinner Part (x < 0)
+    // "Cone is too sharp...". Use Elliptical/Ogive for blunter nose.
+    const spinnerLen = 1.2; // Slightly shorter -> stouter
+    const numSpin = 24;
+
+    // Spinner (x: -1.2 -> 0, r: 0 -> rLPC)
+    for (let i = 0; i <= numSpin; i++) {
+      const t = i / numSpin;
+      const x = -spinnerLen * (1 - t);
+      // Blunt Profile: Power 0.4 gives a very round nose
+      const r = rLPC * Math.pow(t, 0.4);
+      hubPoints.push(new THREE.Vector2(r, x));
+    }
+
+    // B. LPC Cylinder Part (x: 0 -> lpcSectionLen, r: rLPC)
+    // "extended as a small cylinder"
+    hubPoints.push(new THREE.Vector2(rLPC, 0));
+    hubPoints.push(new THREE.Vector2(rLPC, lpcSectionLen));
+
+    // C. Transition Part (Frustum) (x: lpcSectionLen -> +transitionLen)
+    // "Extended into an increasing frustrum"
+    hubPoints.push(new THREE.Vector2(rHPC, lpcSectionLen + transitionLen));
+
+    // D. HPC Cylinder Part (x: -> end)
+    // "Elongate into a large cylinder"
+    hubPoints.push(new THREE.Vector2(rHPC, totalLength));
+    // Close Back
+    hubPoints.push(new THREE.Vector2(0.2, totalLength));
+
+    const hubGeo = new THREE.LatheGeometry(hubPoints, 48);
+    hubGeo.rotateZ(-Math.PI / 2);
+
+    const hubMat = new THREE.MeshStandardMaterial({
+      color: 0x8f949a,
+      metalness: 0.6,
+      roughness: 0.4
+    });
+
+    const mainHub = new THREE.Mesh(hubGeo, hubMat);
+    mainHub.name = "MainRotorHub";
+    this.rotorGroup.add(mainHub);
+
+    // ===========================
+    // 2. CASING (Outer Skin)
+    // ===========================
+    const outerR = casingRadius + 0.05;
     const casingPoints = [
-      new THREE.Vector2(casingRadius, 0),
-      new THREE.Vector2(outerR, 0),
-      new THREE.Vector2(outerR, length),
-      new THREE.Vector2(casingRadius, length),
-      new THREE.Vector2(casingRadius, 0)
+      new THREE.Vector2(casingRadius, -0.5),
+      new THREE.Vector2(outerR, -0.5),
+      new THREE.Vector2(outerR, totalLength),
+      new THREE.Vector2(casingRadius, totalLength),
+      new THREE.Vector2(casingRadius, -0.5)
     ];
-    // Rotate -90 aligned
     const casingGeo = new THREE.LatheGeometry(casingPoints, 32);
     casingGeo.rotateZ(-Math.PI / 2);
 
@@ -51,7 +115,8 @@ export class Compressor extends THREE.Group {
       roughness: 0.4,
       side: THREE.DoubleSide,
       transparent: true,
-      opacity: 0.2 // See-through default
+      opacity: 0.2,
+      depthWrite: false, // Allow particles to be seen inside
     });
 
     const casing = new THREE.Mesh(casingGeo, casingMat);
@@ -59,150 +124,96 @@ export class Compressor extends THREE.Group {
     this.add(casing);
 
     // ===========================
-    // 2. MATERIALS
+    // 3. BLADES (LPC & HPC Zones)
     // ===========================
-    const rotorMat = new THREE.MeshStandardMaterial({
-      color: 0xcccccc, // Silver Blade
-      metalness: 0.5,
-      roughness: 0.5
-    });
-    const statorMat = new THREE.MeshStandardMaterial({
-      color: 0xaaaaaa, // Silver Stator
-      metalness: 0.4,
-      roughness: 0.6
-    });
-    const hubMat = new THREE.MeshStandardMaterial({
-      color: 0x8f949a,
-      metalness: 0.5,
-      roughness: 0.5
-    });
+    const rotorMat = new THREE.MeshStandardMaterial({ color: 0xcccccc, metalness: 0.7, roughness: 0.3 });
+    const statorMat = new THREE.MeshStandardMaterial({ color: 0x999999, metalness: 0.5, roughness: 0.5 });
 
-    // ===========================
-    // 3. SPINNER (Nose Cone)
-    // ===========================
-    const spinnerHeight = 1.0;
-    const spinnerPoints = [];
-    const numPoints = 20;
-    for (let i = 0; i <= numPoints; i++) {
-      const t = i / numPoints; // 0 to 1
-      // x goes from -spinnerHeight to 0
-      const x = -spinnerHeight * (1 - t);
-      // r goes from 0 to inletHubRadius (Ogive)
-      const r = inletHubRadius * Math.sin(t * Math.PI / 2);
-      spinnerPoints.push(new THREE.Vector2(r, x));
-    }
-    const spinnerGeo = new THREE.LatheGeometry(spinnerPoints, 32);
-    spinnerGeo.rotateZ(-Math.PI / 2);
-
-    const spinner = new THREE.Mesh(spinnerGeo, hubMat);
-    spinner.name = "Spinner";
-    this.rotorGroup.add(spinner);
-
-    // ===========================
-    // 4. STAGES (Rotor + Stator)
-    // ===========================
-    for (let i = 0; i < stageCount; i++) {
-      const xPos = i * spacing;
-
-      // Interpolate Hub Radius for this stage segment
-      // x goes from i*spacing to (i+1)*spacing
-      const tStart = i / stageCount;
-      const tEnd = (i + 1) / stageCount;
-
-      const rStart = inletHubRadius + (exitHubRadius - inletHubRadius) * tStart;
-      const rEnd = inletHubRadius + (exitHubRadius - inletHubRadius) * tEnd;
-
-      // Hub Segment (Conical/Frustum to make it smooth, not stepped)
-      // Top=rEnd (X+), Bottom=rStart (X-)
-      const segGeo = new THREE.CylinderGeometry(rEnd, rStart, spacing, 32);
-      segGeo.rotateZ(-Math.PI / 2);
-      const seg = new THREE.Mesh(segGeo, hubMat);
-      seg.position.set(xPos + spacing / 2, 0, 0);
-      this.rotorGroup.add(seg);
+    // Helper to build stage
+    const addStage = (x, hubR, bladeCount, isLPC) => {
+      // Rotor Blade Height
+      // If isLPC, casing is casingRadius. if HPC, casing is casingRadius.
+      // Hub is different.
+      const bladeH = casingRadius - hubR - 0.03;
 
       // A. ROTOR
-      // Calculate radius specifically at the Rotor's X position
-      // Rotor is at 0.25 of the spacing
-      const tRotor = (i + 0.25) / stageCount;
-      const rRotor = inletHubRadius + (exitHubRadius - inletHubRadius) * tRotor;
-
-      // Blade Geometry
-      const bladeHeight = casingRadius - rRotor - 0.02;
-
-      // Generate Single Blade Geometry (re-used)
-      let rotorGeo;
+      // Attached to rotorGroup (Rotating)
+      let rotGeo;
       try {
-        rotorGeo = BladeGenerator.createRotor({
-          radius: casingRadius - 0.02,
-          hubRadius: rRotor,
-          count: 32,
-          length: spacing * 0.4,
-          twist: 0.5
-        });
-      } catch (e) {
-        rotorGeo = new THREE.BoxGeometry(0.1, bladeHeight, 0.3);
+        if (BladeGenerator && BladeGenerator.createRotor) {
+          rotGeo = BladeGenerator.createRotor({
+            radius: casingRadius - 0.02,
+            hubRadius: hubR,
+            count: bladeCount,
+            length: (isLPC ? lpcSpacing : hpcSpacing) * 0.4,
+            twist: isLPC ? 0.6 : 0.3
+          });
+        } else throw "NoGen";
+      } catch (e) { rotGeo = new THREE.BoxGeometry(0.1, bladeH, 0.1); }
+
+      const rGrp = new THREE.Group();
+      rGrp.name = "RotorStage";
+      rGrp.position.set(x, 0, 0);
+      this.rotorGroup.add(rGrp);
+
+      for (let i = 0; i < bladeCount; i++) {
+        const theta = (i / bladeCount) * Math.PI * 2;
+        const b = new THREE.Mesh(rotGeo, rotorMat);
+        b.name = "RotorBlade"; // Naming for ControlPanel targeting
+        b.position.set(0, Math.cos(theta) * hubR, Math.sin(theta) * hubR);
+        b.rotation.x = theta;
+        b.rotation.y = 0.4;
+        rGrp.add(b);
       }
 
-      const stageRotorGroup = new THREE.Group();
-      stageRotorGroup.position.set(xPos + spacing * 0.25, 0, 0);
-      stageRotorGroup.name = `RotorStage${i + 1}`;
-      this.rotorGroup.add(stageRotorGroup);
+      // B. STATOR
+      // Attached to THIS (Static)
+      // Visually detached from hub: radius = hubR + small gap
+      const statorHubR = hubR + 0.04;
 
-      // Loop to place blades radially
-      const numBlades = 32;
-      for (let b = 0; b < numBlades; b++) {
-        const theta = (b / numBlades) * Math.PI * 2;
-        const blade = new THREE.Mesh(rotorGeo, rotorMat);
-
-        blade.position.y = Math.cos(theta) * rRotor;
-        blade.position.z = Math.sin(theta) * rRotor;
-        blade.rotation.x = theta; // Radial
-        blade.rotation.y = 0.4;   // AoA
-
-        blade.name = `CompressorBlade_S${i}_B${b}`;
-        stageRotorGroup.add(blade);
-      }
-
-      // C. STATOR
-      // Calculate radius at Stator position (0.75)
-      const tStator = (i + 0.75) / stageCount;
-      const rStator = inletHubRadius + (exitHubRadius - inletHubRadius) * tStator;
-
-      let statorGeo;
+      let statGeo;
       try {
-        statorGeo = BladeGenerator.createStator({
-          radius: casingRadius,
-          hubRadius: rStator,
-          count: 36,
-          length: spacing * 0.3
-        });
-      } catch (e) {
-        statorGeo = new THREE.BoxGeometry(0.1, casingRadius - rStator, 0.2);
+        if (BladeGenerator && BladeGenerator.createStator) {
+          statGeo = BladeGenerator.createStator({
+            radius: casingRadius,
+            hubRadius: statorHubR,
+            count: bladeCount + 5,
+            length: (isLPC ? lpcSpacing : hpcSpacing) * 0.3
+          });
+        } else throw "NoGen";
+      } catch (e) { statGeo = new THREE.BoxGeometry(0.1, casingRadius - statorHubR, 0.1); }
+
+      const sGrp = new THREE.Group();
+      sGrp.name = "StatorStage";
+      sGrp.position.set(x + (isLPC ? lpcSpacing : hpcSpacing) * 0.5, 0, 0);
+      this.add(sGrp);
+
+      for (let i = 0; i < bladeCount + 5; i++) {
+        const theta = (i / (bladeCount + 5)) * Math.PI * 2;
+        const s = new THREE.Mesh(statGeo, statorMat);
+        s.name = "StatorVane"; // Naming for ControlPanel targeting
+        // Position
+        s.position.set(0, Math.cos(theta) * statorHubR, Math.sin(theta) * statorHubR);
+        s.rotation.x = theta;
+        s.rotation.y = -0.4;
+        sGrp.add(s);
       }
 
-      const stageStatorGroup = new THREE.Group();
-      stageStatorGroup.name = `StatorStage${i + 1}`;
-      // Stators base X is fixed at spacing * 0.75 relative to stage start
-      stageStatorGroup.position.set(xPos + spacing * 0.75, 0, 0);
-      this.add(stageStatorGroup);
+      // Optional: Stator Outer Ring visual for attachment?
+    };
 
-      const numStators = 36;
-      for (let b = 0; b < numStators; b++) {
-        const theta = (b / numStators) * Math.PI * 2;
-        const vane = new THREE.Mesh(statorGeo, statorMat);
+    // Build LPC Stages (On Small Cylinder)
+    for (let i = 0; i < lpcCount; i++) {
+      const x = i * lpcSpacing + lpcSpacing * 0.2;
+      addStage(x, rLPC, 24, true);
+    }
 
-        vane.position.y = Math.cos(theta) * rStator;
-        vane.position.z = Math.sin(theta) * rStator;
-        // Position is now relative to group (which is at xPos + spacing*0.75)
-        vane.position.x = 0;
-
-        vane.rotation.x = theta;
-        vane.rotation.y = -0.4;
-
-        vane.name = `CompressorVane_S${i}_B${b}`;
-
-        stageStatorGroup.add(vane);
-      }
+    // Build HPC Stages (On Large Cylinder)
+    // Start after Transition
+    const hpcStart = lpcSectionLen + transitionLen;
+    for (let i = 0; i < hpcCount; i++) {
+      const x = hpcStart + i * hpcSpacing + hpcSpacing * 0.2;
+      addStage(x, rHPC, 42, false);
     }
   }
 

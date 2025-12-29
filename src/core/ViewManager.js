@@ -91,7 +91,7 @@ export class ViewManager {
         const isCombustor = targetComponent.name === 'Combustor';
 
         this.auxiliaries.forEach(aux => {
-            if (aux.name === 'ParticleSystem') {
+            if (aux.name === 'VolumetricFlow') {
                 aux.visible = true; // Keep Airflow
             } else if (aux.name === 'CombustionFlames') {
                 aux.visible = isCombustor;
@@ -202,19 +202,41 @@ export class ViewManager {
         const size = width * height;
         const data = new Uint8Array(4 * size);
 
-        const colors = [new THREE.Color(0xffffff), new THREE.Color(0x333333)];
+        // Engineering Blue/Grid aesthetics
+        // Background: Dark Blueprint (#001a33) -> RGB(0, 26, 51)
+        // Grid Lines: Cyan/White (#00ffff) -> RGB(0, 255, 255)
+
+        const rbg = 10, gbg = 15, bbg = 30; // Dark Blue Grey Background
+        const rline = 0, gline = 100, bline = 200; // Cyan-ish Grid
 
         for (let i = 0; i < size; i++) {
             const stride = i * 4;
             const x = i % width;
             const y = Math.floor(i / width);
-            const check = ((Math.floor(x / 32) + Math.floor(y / 32)) % 2 === 0) ? 0 : 1;
-            const color = colors[check];
 
-            data[stride] = color.r * 255;
-            data[stride + 1] = color.g * 255;
-            data[stride + 2] = color.b * 255;
-            data[stride + 3] = 255;
+            // Grid Lines every 64 pixels (Major), 16 (Minor)
+            const isMajor = (x % 64 === 0 || y % 64 === 0);
+            const isMinor = (x % 16 === 0 || y % 16 === 0);
+
+            if (isMajor) {
+                // Bright Line
+                data[stride] = rline;
+                data[stride + 1] = gline + 55;
+                data[stride + 2] = bline + 55;
+                data[stride + 3] = 255;
+            } else if (isMinor) {
+                // Faint Line
+                data[stride] = rline;
+                data[stride + 1] = gline;
+                data[stride + 2] = bline;
+                data[stride + 3] = 255;
+            } else {
+                // Background
+                data[stride] = rbg;
+                data[stride + 1] = gbg;
+                data[stride + 2] = bbg;
+                data[stride + 3] = 255;
+            }
         }
 
         const texture = new THREE.DataTexture(data, width, height, THREE.RGBAFormat);
@@ -240,66 +262,124 @@ export class ViewManager {
             }
         `;
 
-        // Fragment Shader: Physics-Based Temp Map
+        // Fragment Shader: Blackbody Radiation approximation
         const fs = `
             uniform float uT2; // Inlet
             uniform float uT3; // Compressor Exit
             uniform float uT4; // Combustor Exit
             uniform float uT5; // Turbine Exit
+            uniform float uTime; // For heat shimmer
             
             varying vec3 vWorldPos;
             varying vec3 vNormal;
             
-            // Thermal Color Map (Black -> Blue -> Cyan -> Green -> Yellow -> Red -> White)
-            vec3 heatColor(float temp) {
-                // Modified Range: 300K (Ambient) to 1100K (Max Visual Heat)
-                // This ensures T5 (~900K) looks RED/ORANGE, not Blue.
-                float t = clamp((temp - 300.0) / 800.0, 0.0, 1.0);
+            // gradient noise for shimmer
+            float hash( float n ) { return fract(sin(n)*43758.5453123); }
+            float noise( in vec3 x ){
+                vec3 p = floor(x);
+                vec3 f = fract(x);
+                f = f*f*(3.0-2.0*f);
+                float n = p.x + p.y*57.0 + 113.0*p.z;
+                return mix(mix(mix( hash(n+  0.0), hash(n+  1.0),f.x),
+                               mix( hash(n+ 57.0), hash(n+ 58.0),f.x),f.y),
+                           mix(mix( hash(n+113.0), hash(n+114.0),f.x),
+                               mix( hash(n+170.0), hash(n+171.0),f.x),f.y),f.z);
+            }
+
+            // Blackbody Color Ramp (Physics based visual)
+            vec3 getBlackBodyColor(float temp) {
+                // Smooth transition from Cold Metal to Hot Glow
+                // Start showing heat around 500K (faint deep red) to 1400K (White)
                 
-                vec3 c = vec3(0.0);
-                if (t < 0.2) return mix(vec3(0,0,0.5), vec3(0,0,1), t/0.2); // Cold Blue
-                if (t < 0.4) return mix(vec3(0,0,1), vec3(0,1,1), (t-0.2)/0.2); // Cyan
-                if (t < 0.6) return mix(vec3(0,1,1), vec3(1,1,0), (t-0.4)/0.2); // Green-Yellow
-                if (t < 0.8) return mix(vec3(1,1,0), vec3(1,0.5,0), (t-0.6)/0.2); // Orange (Tweaked)
-                return mix(vec3(1,0.5,0), vec3(1,1,1), (t-0.8)/0.2); // Red/White
+                // GLOW THRESHOLD FIX: Increase start to 800K to keep Compressor (approx 600K) cool.
+                float t = clamp((temp - 800.0) / 800.0, 0.0, 1.0); 
+                
+                // Base Metal (Cool)
+                // Distinct Blue for Cold/Inlet -> Fades to Grey -> then Glows
+                vec3 cColdBlue = vec3(0.0, 0.2, 0.8); // Strong Blue for inlet
+                vec3 cGrey = vec3(0.1, 0.1, 0.1);     // Standard Metal
+
+                // Heat Gradient stops
+                vec3 cRed = vec3(0.8, 0.05, 0.0);
+                vec3 cOrange = vec3(1.0, 0.4, 0.0);
+                vec3 cYellow = vec3(1.0, 0.9, 0.2);
+                vec3 cWhite = vec3(1.0, 1.0, 1.0);
+                
+                vec3 glow = vec3(0.0);
+                
+                // Non-linear ramp for realistic "incandescence"
+                // It really picks up after 800K
+                if (t < 0.25) glow = mix(vec3(0.0), cRed, t / 0.25);
+                else if (t < 0.5) glow = mix(cRed, cOrange, (t - 0.25) / 0.25);
+                else if (t < 0.75) glow = mix(cOrange, cYellow, (t - 0.5) / 0.25);
+                else glow = mix(cYellow, cWhite, (t - 0.75) / 0.25);
+
+                // Mix Cold and Glow based on temp
+                // At low temp, mostly Metal. At high temp, Metal is overwhelmed.
+                
+                // Cold Logic: 300K -> Blue, 800K -> Grey
+                float coldT = clamp((temp - 300.0) / 500.0, 0.0, 1.0);
+                vec3 baseColor = mix(cColdBlue, cGrey, coldT);
+
+                float glowStrength = t * t * t; // Cubic curve for emission
+                return mix(baseColor, glow, clamp(t * 1.5, 0.0, 1.0));
             }
 
             void main() {
                  float x = vWorldPos.x;
                  
-                 // Calibrated Station Locations (World X) for Turbojet
-                 // Intake: 0.0 - 1.1
-                 // Compressor: 1.1 - 4.6
-                 // Combustor: 4.6 - 6.6
-                 // Turbine: 6.6 - 9.0
-                 // Nozzle: 9.0 - 11.0
+                 // Smooth Gradient Multi-Stop Interpolation
+                 // Points: X=0(Inlet), 4(Comp), 6(Comb), 8.5(Turb), 11(Noz)
+                 
+                 float t2_pos = 1.0;
+                 float t3_pos = 4.6;
+                 float t4_pos = 6.6;
+                 float t5_pos = 9.0;
                  
                  float localT = uT2;
                  
-                 // Interpolate Temperature based on Position
-                 if (x < 1.1) {
+                 // Smooth Hermite interpolation or Linear? Linear is predictable.
+                 // We calculate weights for each segment.
+                 
+                 if (x < t2_pos) {
                      localT = uT2;
-                 } else if (x < 4.6) {
-                     // Compressor: 1.1 to 4.6 (Range 3.5)
-                     localT = mix(uT2, uT3, (x - 1.1) / 3.5);
-                 } else if (x < 6.6) {
-                     // Combustor: 4.6 to 6.6 (Range 2.0)
-                     localT = mix(uT3, uT4, (x - 4.6) / 2.0);
-                 } else if (x < 9.0) {
-                     // Turbine: 6.6 to 9.0 (Range 2.4)
-                     localT = mix(uT4, uT5, (x - 6.6) / 2.4);
+                 } else if (x < t3_pos) {
+                     float f = (x - t2_pos) / (t3_pos - t2_pos);
+                     localT = mix(uT2, uT3, f);
+                 } else if (x < t4_pos) {
+                     float f = (x - t3_pos) / (t4_pos - t3_pos);
+                     localT = mix(uT3, uT4, f);
+                 } else if (x < t5_pos) {
+                     float f = (x - t4_pos) / (t5_pos - t4_pos);
+                     localT = mix(uT4, uT5, f);
                  } else {
-                     // Nozzle
                      localT = uT5;
                  }
                  
-                 vec3 color = heatColor(localT);
+                 // Add subtle noise shimmer to temperature to simulate turbulent convection
+                 float shimmer = noise(vWorldPos * 2.0 + vec3(uTime * 2.0, 0.0, 0.0)) * 0.05;
+                 // Only shimmer if hot
+                 if (localT > 600.0) localT += localT * shimmer;
+
+                 vec3 color = getBlackBodyColor(localT);
                  
-                 // Simple lighting
+                 // Fake Rim Lighting for 3D volume feel
+                 vec3 viewDir = normalize(cameraPosition - vWorldPos);
+                 float rim = 1.0 - max(dot(viewDir, vNormal), 0.0);
+                 rim = pow(rim, 3.0);
+                 
+                 // Lighting
                  vec3 light = normalize(vec3(0.5, 1.0, 0.5));
-                 float diff = max(dot(vNormal, light), 0.4);
+                 float diff = max(dot(vNormal, light), 0.3);
                  
-                 gl_FragColor = vec4(color * diff, 1.0);
+                 // Combine: Color * Diffuse + Glow + Rim
+                 // If hot, Diffuse matters less, Glow matters more
+                 float heatFactor = clamp((localT - 600.0)/800.0, 0.0, 1.0);
+                 
+                 vec3 finalColor = mix(color * diff, color, heatFactor * 0.9);
+                 finalColor += vec3(0.2, 0.1, 0.0) * rim * heatFactor; // Red rim light when hot
+
+                 gl_FragColor = vec4(finalColor, 1.0);
             }
         `;
 
@@ -308,7 +388,8 @@ export class ViewManager {
                 uT2: { value: 300.0 },
                 uT3: { value: 400.0 },
                 uT4: { value: 1000.0 },
-                uT5: { value: 800.0 }
+                uT5: { value: 800.0 },
+                uTime: { value: 0.0 }
             },
             vertexShader: vs,
             fragmentShader: fs,
@@ -412,6 +493,14 @@ export class ViewManager {
                         // Maybe. For now override all.
                     }
 
+                    // CRITICAL FIX: Do NOT override FX materials (Flames have specific uniforms)
+                    if (child.name === 'CombustionFlames' ||
+                        child.name === 'FuelSpray' ||
+                        child.isPoints ||
+                        child.isSprite) {
+                        return;
+                    }
+
                     child.material = overrideMat;
                 }
             }
@@ -480,6 +569,7 @@ export class ViewManager {
             this.heatShader.uniforms.uT3.value = this.physics.stations[3].T;
             this.heatShader.uniforms.uT4.value = this.physics.stations[4].T;
             this.heatShader.uniforms.uT5.value = this.physics.stations[5].T;
+            this.heatShader.uniforms.uTime.value += dt; // ANIMATION FIX
         }
 
         // Animation Logic
@@ -536,8 +626,8 @@ export class ViewManager {
                     // Spread Left (X-)
                     statorIndex++;
                     target.y += 1.5;
-                    // CRITICAL: Increase multiplier to prevent visual merging
-                    target.x -= (statorIndex * 2.5);
+                    // Reduced multiplier from 2.5 to 1.0 for closer packing
+                    target.x -= (statorIndex * 1.0);
                 }
                 else if (child.name === "Spinner") {
                     target.x -= 2.0; // Move forward
