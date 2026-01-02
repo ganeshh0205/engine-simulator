@@ -186,6 +186,26 @@ export class ControlPanel {
         });
         testBtn.onclick = () => this.runPerformanceTest();
         btnRow.appendChild(testBtn);
+
+        // BRIDGE: Log Snapshot Button
+        const logBtn = document.createElement("button");
+        logBtn.innerText = "LOG DATA POINT";
+        Object.assign(logBtn.style, {
+            flex: "1", padding: "8px", background: "#48bb78", color: "#fff", border: "none", cursor: "pointer", fontSize: "11px", fontWeight: "bold"
+        });
+        logBtn.onclick = () => {
+            const s = this.physics.state;
+            const id = bridge.getSuggestion().id || "manual_log";
+            bridge.logResult(id, {
+                thrust: s.thrust,
+                rpm: s.rpm,
+                fuelFlow: s.fuelFlow
+            });
+            alert("Data Logged to Knowledge Bridge!");
+        };
+        btnRow.appendChild(logBtn);
+
+
         this.container.appendChild(btnRow);
 
         // Restore container to panel (though addX uses this.container)

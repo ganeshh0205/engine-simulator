@@ -110,25 +110,38 @@ export class Combustor extends THREE.Group {
 
 
     /* =======================
-       1. Diffuser (Transition Frustum)
+       1. Diffuser Pipes (Connecting HPC to Cans)
     ======================= */
-    // Inner Wall: Tapers from inletRadius (Compressor Exit) -> shaftRadius (Central Rod)
-    // This creates the "Cone" the user requested.
+    const pipeCount = 12;
+    const hpcMidR = (inletRadius + 1.0) * 0.5; // (0.58 + 1.0)/2 = 0.79
+    const combMidR = (innerRadius + outerRadius) * 0.5; // (0.45 + 1.0)/2 = 0.725
 
-    const diffGeo = new THREE.CylinderGeometry(shaftRadius, inletRadius, diffuserLen, 48, 1, true);
-    diffGeo.rotateZ(-Math.PI / 2);
+    const pipeGeo = new THREE.CylinderGeometry(0.06, 0.08, diffuserLen * 1.05, 16);
+    pipeGeo.rotateX(Math.PI / 2); // Align Z (Standard LookAt)
 
-    const diffMat = new THREE.MeshStandardMaterial({
-      color: 0x999999,
+    const pipeMat = new THREE.MeshStandardMaterial({
+      color: 0x888888,
       metalness: 0.6,
-      roughness: 0.5,
-      side: THREE.DoubleSide
+      roughness: 0.5
     });
 
-    const diffuser = new THREE.Mesh(diffGeo, diffMat);
-    diffuser.position.x = diffuserLen / 2;
-    diffuser.name = "DiffuserHub";
-    this.add(diffuser);
+    for (let i = 0; i < pipeCount; i++) {
+      const theta = (i / pipeCount) * Math.PI * 2;
+
+      // Start (HPC Exit)
+      const sY = Math.cos(theta) * hpcMidR;
+      const sZ = Math.sin(theta) * hpcMidR;
+
+      // End (Combustor Head)
+      const eY = Math.cos(theta) * combMidR;
+      const eZ = Math.sin(theta) * combMidR;
+
+      const pipe = new THREE.Mesh(pipeGeo, pipeMat);
+      // Midpoint
+      pipe.position.set(diffuserLen / 2, (sY + eY) / 2, (sZ + eZ) / 2);
+      pipe.lookAt(diffuserLen, eY, eZ); // Point forward-inward
+      this.add(pipe);
+    }
 
 
     /* =======================
@@ -325,44 +338,35 @@ export class Combustor extends THREE.Group {
   }
 
   initEffects(midRadius, linerLen, baseZ) {
-    // A. FUEL SPRAY
-    const injectorCount = 12; // MATCH CAN COUNT
-    const positions = [];
-    const normals = [];
+    this.sprays = [];
+    this.igniters = [];
 
-    for (let i = 0; i < injectorCount; i++) {
-      const theta = (i / injectorCount) * Math.PI * 2;
+    const canCount = 12;
+
+    for (let i = 0; i < canCount; i++) {
+      const theta = (i / canCount) * Math.PI * 2;
       const y = Math.cos(theta) * midRadius;
       const z = Math.sin(theta) * midRadius;
 
-      // Position: BaseZ + small offset (0.1) to clear dome
-      positions.push(new THREE.Vector3(baseZ + 0.1, y, z));
+      // A. FUEL SPRAY (One per Can)
+      // Pos: BaseZ + 0.1
+      const pos = new THREE.Vector3(baseZ + 0.1, y, z);
+      const norm = new THREE.Vector3(1, 0, 0);
 
-      // Normal: Spraying BACKWARDS (+x)
-      normals.push(new THREE.Vector3(1, 0, 0));
+      const spray = new FuelSpraySystem(1, [pos], [norm]);
+      spray.visible = false;
+      this.add(spray);
+      this.sprays.push(spray);
+
+      // B. IGNITION SPARK (One per Can)
+      // Pos: BaseZ + 0.3 * Length
+      const sparkPos = new THREE.Vector3(baseZ + linerLen * 0.3, y, z);
+      const igniter = new IgnitionSpark([sparkPos]);
+      this.add(igniter);
+      this.igniters.push(igniter);
     }
 
-    this.fuelSpray = new FuelSpraySystem(injectorCount, positions, normals);
-    this.fuelSpray.visible = false;
-    this.add(this.fuelSpray);
-
-    // B. IGNITION SPARKS
-    // 2 Locations (Plug Angles)
-    const sparkPos = [];
-    const plugAngles = [Math.PI * 0.3, Math.PI * 1.7];
-    const sparkDist = midRadius; // Inside liner
-
-    plugAngles.forEach(theta => {
-      const y = Math.cos(theta) * sparkDist;
-      const z = Math.sin(theta) * sparkDist;
-      // Position: Near the plugs (BaseZ + 30% of liner length)
-      sparkPos.push(new THREE.Vector3(baseZ + linerLen * 0.3, y, z));
-    });
-
-    this.ignitionSpark = new IgnitionSpark(sparkPos);
-    this.add(this.ignitionSpark);
-
-    // C. VOLUMETRIC FLAME
+    // C. VOLUMETRIC FLAME (Shared Annulus for now, easier to render)
     // Cylinder fitting inside Liner
     const flameGeo = new THREE.CylinderGeometry(midRadius + 0.1, midRadius + 0.05, linerLen * 0.8, 32, 1, true);
     flameGeo.rotateZ(-Math.PI / 2);
@@ -387,6 +391,8 @@ export class Combustor extends THREE.Group {
     this.flameMesh.name = "CombustionFlames"; // For ViewManager check
     this.flameMesh.visible = false;
     this.add(this.flameMesh);
+
+    this.sequenceTime = 0;
   }
 
   // Define update method
@@ -396,22 +402,43 @@ export class Combustor extends THREE.Group {
     const fuelFlow = s.fuelFlow;
     const rpm = s.rpm;
 
-    // Update Fuel Spray
-    if (this.fuelSpray) {
-      this.fuelSpray.update(dt, fuelFlow);
+    // BATCH IGNITION LOGIC
+    if (fuelFlow > 0.001) {
+      this.sequenceTime += dt * 3.0; // Speed of sequencing
+
+      const maxCan = this.sprays.length;
+      // Cycle active cans
+      // If Just Starting, activate one by one.
+      // If Running, all active.
+
+      const activeCount = Math.min(Math.floor(this.sequenceTime), maxCan);
+
+      for (let i = 0; i < maxCan; i++) {
+        // A. FUEL SPRAY
+        // Active if index < activeCount
+        if (i < activeCount) {
+          this.sprays[i].update(dt, fuelFlow);
+
+          // B. IGNITION
+          // Trigger spark ONCE when this can activates
+          // Check if just activated? 
+          // Simple: If i == activeCount - 1 (The newest one), trigger spark
+          if (i === activeCount - 1 && !this.igniters[i].active) {
+            this.igniters[i].trigger();
+          }
+        } else {
+          this.sprays[i].visible = false;
+        }
+
+        // Update sparks regardless
+        this.igniters[i].update(dt);
+      }
+
+    } else {
+      this.sequenceTime = 0;
+      this.sprays.forEach(s => s.visible = false);
     }
 
-    // Update Ignition
-    // Trigger logic: If RPM > 10% and moving from "Off"? 
-    // Or just if physics says "Ignition On". Physics doesn't have explicit flag yet.
-    // Logic: If RPM increasing between 10% and 40%, spark is usually active.
-    if (this.ignitionSpark) {
-      // Auto Trigger logic
-      if (rpm > 10 && rpm < 40 && fuelFlow > 0.001) {
-        if (!this.ignitionSpark.active) this.ignitionSpark.trigger();
-      }
-      this.ignitionSpark.update(dt);
-    }
 
     // Update Flame Shader
     if (this.flameMesh && this.flameMesh.material.uniforms) {
@@ -424,8 +451,8 @@ export class Combustor extends THREE.Group {
       const normAFR = (physics.inputs.afr - 15) / (60 - 15);
       u.uAFR.value = Math.max(0, Math.min(1, normAFR));
 
-      // Visibility based on Fuel Flow
-      this.flameMesh.visible = (fuelFlow > 0.001);
+      // Visibility based on Fuel Flow (Delayed slightly?)
+      this.flameMesh.visible = (fuelFlow > 0.001 && this.sequenceTime > 2.0);
     }
   }
 }

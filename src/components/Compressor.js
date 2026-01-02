@@ -44,40 +44,37 @@ export class Compressor extends THREE.Group {
     this.length = totalLength;
 
     // Radius Definition
-    const rLPC = 0.55; // Increased from 0.35 ("not so small")
-    const rHPC = 0.82; // Large cylinder
+    const rLPC_Start = 0.35; // Start small (Tall blades)
+    const rLPC_End = 0.58;   // End larger (Matches HPC)
+    const rHPC = 0.58;       // Constant (Tall blades 0.42m)
 
     // ===========================
     // 1. ROTATING HUB (Complex Shape)
     // ===========================
-    // Points for Lathe: [Spinner] -> [LPC Cylinder] -> [Transition] -> [HPC Cylinder]
+    // Points for Lathe: [Spinner] -> [LPC Cylinder Taper] -> [Transition] -> [HPC Cylinder]
     const hubPoints = [];
 
     // A. Spinner Part (x < 0)
-    // "Cone is too sharp...". Use Elliptical/Ogive for blunter nose.
-    const spinnerLen = 1.2; // Slightly shorter -> stouter
+    const spinnerLen = 1.2;
     const numSpin = 24;
 
-    // Spinner (x: -1.2 -> 0, r: 0 -> rLPC)
+    // Spinner (x: -1.2 -> 0, r: 0 -> rLPC_Start)
     for (let i = 0; i <= numSpin; i++) {
       const t = i / numSpin;
       const x = -spinnerLen * (1 - t);
-      // Blunt Profile: Power 0.4 gives a very round nose
-      const r = rLPC * Math.pow(t, 0.4);
+      const r = rLPC_Start * Math.pow(t, 0.4);
       hubPoints.push(new THREE.Vector2(r, x));
     }
 
-    // B. LPC Cylinder Part (x: 0 -> lpcSectionLen, r: rLPC)
-    // "extended as a small cylinder"
-    hubPoints.push(new THREE.Vector2(rLPC, 0));
-    hubPoints.push(new THREE.Vector2(rLPC, lpcSectionLen));
+    // B. LPC Taper Part (x: 0 -> lpcSectionLen, r: rLPC_Start -> rLPC_End)
+    hubPoints.push(new THREE.Vector2(rLPC_Start, 0));
+    hubPoints.push(new THREE.Vector2(rLPC_End, lpcSectionLen));
 
     // C. Transition Part (Frustum) (x: lpcSectionLen -> +transitionLen)
-    // "Extended into an increasing frustrum"
+    // Connects LPC End to HPC Start (No jump if equal)
     hubPoints.push(new THREE.Vector2(rHPC, lpcSectionLen + transitionLen));
 
     // D. HPC Cylinder Part (x: -> end)
-    // "Elongate into a large cylinder"
     hubPoints.push(new THREE.Vector2(rHPC, totalLength));
     // Close Back
     hubPoints.push(new THREE.Vector2(0.2, totalLength));
@@ -131,13 +128,10 @@ export class Compressor extends THREE.Group {
 
     // Helper to build stage
     const addStage = (x, hubR, bladeCount, isLPC) => {
-      // Rotor Blade Height
-      // If isLPC, casing is casingRadius. if HPC, casing is casingRadius.
-      // Hub is different.
+      // Blade Height = Casing - Hub - Clearance
       const bladeH = casingRadius - hubR - 0.03;
 
       // A. ROTOR
-      // Attached to rotorGroup (Rotating)
       let rotGeo;
       try {
         if (BladeGenerator && BladeGenerator.createRotor) {
@@ -159,7 +153,7 @@ export class Compressor extends THREE.Group {
       for (let i = 0; i < bladeCount; i++) {
         const theta = (i / bladeCount) * Math.PI * 2;
         const b = new THREE.Mesh(rotGeo, rotorMat);
-        b.name = "RotorBlade"; // Naming for ControlPanel targeting
+        b.name = "RotorBlade";
         b.position.set(0, Math.cos(theta) * hubR, Math.sin(theta) * hubR);
         b.rotation.x = theta;
         b.rotation.y = 0.4;
@@ -167,10 +161,7 @@ export class Compressor extends THREE.Group {
       }
 
       // B. STATOR
-      // Attached to THIS (Static)
-      // Visually detached from hub: radius = hubR + small gap
       const statorHubR = hubR + 0.04;
-
       let statGeo;
       try {
         if (BladeGenerator && BladeGenerator.createStator) {
@@ -191,25 +182,24 @@ export class Compressor extends THREE.Group {
       for (let i = 0; i < bladeCount + 5; i++) {
         const theta = (i / (bladeCount + 5)) * Math.PI * 2;
         const s = new THREE.Mesh(statGeo, statorMat);
-        s.name = "StatorVane"; // Naming for ControlPanel targeting
-        // Position
+        s.name = "StatorVane";
         s.position.set(0, Math.cos(theta) * statorHubR, Math.sin(theta) * statorHubR);
         s.rotation.x = theta;
         s.rotation.y = -0.4;
         sGrp.add(s);
       }
-
-      // Optional: Stator Outer Ring visual for attachment?
     };
 
-    // Build LPC Stages (On Small Cylinder)
+    // Build LPC Stages (On Tapering Cylinder)
     for (let i = 0; i < lpcCount; i++) {
       const x = i * lpcSpacing + lpcSpacing * 0.2;
-      addStage(x, rLPC, 24, true);
+      // Interpolate Hub Radius
+      const t = i / (lpcCount - 1);
+      const currentR = rLPC_Start + t * (rLPC_End - rLPC_Start);
+      addStage(x, currentR, 24, true);
     }
 
-    // Build HPC Stages (On Large Cylinder)
-    // Start after Transition
+    // Build HPC Stages (On Large Constant Cylinder)
     const hpcStart = lpcSectionLen + transitionLen;
     for (let i = 0; i < hpcCount; i++) {
       const x = hpcStart + i * hpcSpacing + hpcSpacing * 0.2;

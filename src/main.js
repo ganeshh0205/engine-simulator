@@ -18,20 +18,32 @@ window.onerror = function (message, source, lineno, colno, error) {
 };
 
 import { SceneManager } from "./core/SceneManager.js";
+import { HomeScreen } from "./ui/HomeScreen.js";
 // import { TutorialManager } from "./core/TutorialManager.js"; // Disabled
 
 const app = document.getElementById("app");
 
-// DIRECT LAUNCH
-const sceneManager = new SceneManager(app);
+// ROUTING / STATE MANAGEMENT
+const startSimulation = () => {
+  // Initialize SceneManager (Engine Sim)
+  const sceneManager = new SceneManager(app);
 
-// Initialize Tutorial Module
-// const tutorial = new TutorialManager(sceneManager);
-// sceneManager.tutorial = tutorial; // Attach to scene logic
+  // Initialize Tutorial Module (Optional/Future)
+  // const tutorial = new TutorialManager(sceneManager);
+  // sceneManager.tutorial = tutorial; 
 
-sceneManager.start();
+  sceneManager.start();
+};
 
-
-// Ensure controls are visible
-if (sceneManager.interactionManager && sceneManager.interactionManager.controlPanel) {
-}
+import { MentorView } from "./ui/MentorView.js";
+const home = new HomeScreen((mode) => {
+  if (mode === "SIMULATE") {
+    startSimulation();
+  } else if (mode === "MENTOR") {
+    new MentorView((targetMode) => {
+      if (targetMode === "SIMULATE") startSimulation();
+    });
+  } else {
+    console.log("Unknown mode:", mode);
+  }
+});

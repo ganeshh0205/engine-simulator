@@ -17,9 +17,9 @@ export class EngineFactory {
       new Intake({ length: 1.1 }), // Shortened Nacelle (Flush Spinner)
       // LENGTH FIX: Internal geometry is 5.0m long (LPC 2.0 + Trans 0.5 + HPC 2.5).
       new Compressor({ length: 5.0, stageCount: 4 }), // 4 Stages passed, but builds internal structure
-      // DIAMETER FIX: Diffuser reduces from 0.82 (Compressor Hub) to 0.45 (Combustor Inner)
+      // DIAMETER FIX: Diffuser reduces from 0.58 (Compressor Hub) to 0.45 (Combustor Inner)
       // LENGTH FIX: Restoring size after adding diffuser (2.0 -> 2.8)
-      new Combustor({ length: 2.8, innerRadius: 0.45, inletRadius: 0.82 }),
+      new Combustor({ length: 2.8, innerRadius: 0.45, inletRadius: 0.58 }),
       new Turbine({ length: 3.2, stageCount: 4 }),    // EXTENDED: 4 Stages, 3.2m length
       new Nozzle({ length: 2.0 }),
     ];
