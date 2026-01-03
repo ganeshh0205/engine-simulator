@@ -75,6 +75,8 @@ export class DatabaseManager {
         if (user) {
             this.currentUser = user;
             localStorage.setItem(this.STORAGE_KEY_SESSION, JSON.stringify(user));
+            // Ensure progress exists (fixes missing data for legacy users)
+            this._ensureUserProgress(user.id);
             return { success: true };
         }
         return { success: false, message: "Invalid credentials" };
@@ -90,6 +92,10 @@ export class DatabaseManager {
         const session = localStorage.getItem(this.STORAGE_KEY_SESSION);
         if (session) {
             this.currentUser = JSON.parse(session);
+            // Ensure progress exists
+            if (this.currentUser && this.currentUser.id) {
+                this._ensureUserProgress(this.currentUser.id);
+            }
         }
     }
 
@@ -102,8 +108,30 @@ export class DatabaseManager {
     }
 
     // --- Progress ---
+    _ensureUserProgress(userId) {
+        const data = this._getProgressData();
+        const userProg = data[userId];
+
+        // Check 1: User exists?
+        if (!userProg) {
+            console.log("Initializing new user progress:", userId);
+            this._initUserProgress(userId);
+            return;
+        }
+
+        // Check 2: Stale Data? (Does the first module of the current curriculum exist?)
+        // If we changed IDs (m0 -> motion), the old data is useless.
+        const firstModuleId = CURRICULUM[0].modules[0].id;
+        if (!userProg[firstModuleId]) {
+            console.log("Detected stale/legacy progress data. Re-initializing schema.");
+            // We could try to migrate, but for now, re-init to ensure consistency.
+            this._initUserProgress(userId);
+        }
+    }
+
     _initUserProgress(userId) {
         const data = this._getProgressData();
+        // Warn: This resets progress!
         const userProg = {};
 
         // Flatten Curriculum to find first module

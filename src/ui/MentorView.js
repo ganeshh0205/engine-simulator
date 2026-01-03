@@ -205,11 +205,6 @@ export class MentorView {
 
                 if (isLocked) {
                     item.style.filter = "grayscale(100%)"; item.style.opacity = "0.6";
-                    // Add lock icon overlay
-                    const lockOverlay = document.createElement("div");
-                    lockOverlay.innerHTML = '🔒';
-                    Object.assign(lockOverlay.style, { position: "absolute", right: "15px", opacity: "0.5" });
-                    item.appendChild(lockOverlay);
                 } else {
                     item.onmouseover = () => { if (!isActive) item.style.background = "rgba(255,255,255,0.05)"; };
                     item.onmouseout = () => { if (!isActive) item.style.background = "transparent"; };
@@ -476,14 +471,36 @@ export class MentorView {
             nextWrapper.appendChild(this.nextBtn);
         } else {
             const finishBtn = document.createElement("button");
-            finishBtn.innerText = "CHAPTER COMPLETE";
+            const isLastChapter = this.chapters.indexOf(this.currentChapter) === this.chapters.length - 1;
+
+            // Check current status from DB
+            const isCompleted = dbManager.getModuleStatus(module.id) === 'completed';
+
+            finishBtn.innerText = isCompleted ? "✓ COMPLETED" : (isLastChapter ? "FINISH COURSE" : "COMPLETE CHAPTER");
+
+            // Interaction Check for Chapter End
+            const canFinish = isCompleted || (requiredInteractions === 0 || completedInteractions >= requiredInteractions);
+
             Object.assign(finishBtn.style, {
-                padding: "15px 30px", background: "#48bb78", color: "white", border: "none",
-                borderRadius: "8px", fontSize: "1rem", fontWeight: "bold", cursor: "default"
+                padding: "15px 30px",
+                background: canFinish ? "#48bb78" : "#a0aec0",
+                color: "white", border: "none",
+                borderRadius: "8px", fontSize: "1rem", fontWeight: "bold",
+                cursor: canFinish ? (isCompleted ? "default" : "pointer") : "not-allowed",
+                opacity: canFinish ? "1" : "0.6",
+                boxShadow: canFinish ? "0 4px 6px rgba(72, 187, 120, 0.3)" : "none"
             });
-            if (requiredInteractions === 0 || completedInteractions >= requiredInteractions) {
+
+            finishBtn.disabled = !canFinish && !isCompleted;
+
+            finishBtn.onclick = () => {
+                if (isCompleted) return; // Already done
+
                 dbManager.completeModule(module.id);
-            }
+                // Re-render to update Sidebar and Button State
+                this.render();
+            };
+
             nextWrapper.appendChild(finishBtn);
         }
         main.appendChild(nextWrapper);

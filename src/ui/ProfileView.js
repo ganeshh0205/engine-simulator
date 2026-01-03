@@ -144,7 +144,9 @@ export class ProfileView {
 
         // Detailed List (The "Sheet")
         const table = document.createElement("div");
-        table.style.cssText = "display: flex; flexDirection: column; gap: 2px;";
+        Object.assign(table.style, {
+            display: "flex", flexDirection: "column", gap: "2px"
+        });
 
         // Header Row
         table.innerHTML = `
