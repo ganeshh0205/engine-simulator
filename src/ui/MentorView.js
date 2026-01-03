@@ -285,6 +285,15 @@ export class MentorView {
                     this.nextBtn.style.cursor = "pointer";
                     this.nextBtn.innerText = "NEXT MODULE →";
                 }
+                if (this.finishBtn) {
+                    this.finishBtn.disabled = false;
+                    this.finishBtn.style.opacity = "1";
+                    this.finishBtn.style.cursor = "pointer";
+                    // Only update text if it's not already completed
+                    if (this.finishBtn.innerText !== "✓ COMPLETED" && this.finishBtn.innerText !== "START NEXT CHAPTER →") {
+                        // Keep existing text or update if needed, typically we leave it as "COMPLETE CHAPTER"
+                    }
+                }
             }
         };
 
@@ -470,38 +479,50 @@ export class MentorView {
             };
             nextWrapper.appendChild(this.nextBtn);
         } else {
-            const finishBtn = document.createElement("button");
-            const isLastChapter = this.chapters.indexOf(this.currentChapter) === this.chapters.length - 1;
+            this.finishBtn = document.createElement("button");
+            const currentChIdx = this.chapters.indexOf(this.currentChapter);
+            const isLastChapter = currentChIdx === this.chapters.length - 1;
 
             // Check current status from DB
             const isCompleted = dbManager.getModuleStatus(module.id) === 'completed';
 
-            finishBtn.innerText = isCompleted ? "✓ COMPLETED" : (isLastChapter ? "FINISH COURSE" : "COMPLETE CHAPTER");
+            // Text Logic
+            if (isCompleted) {
+                this.finishBtn.innerText = isLastChapter ? "COURSE COMPLETED" : "START NEXT CHAPTER →";
+            } else {
+                this.finishBtn.innerText = isLastChapter ? "FINISH COURSE" : "COMPLETE CHAPTER";
+            }
 
             // Interaction Check for Chapter End
             const canFinish = isCompleted || (requiredInteractions === 0 || completedInteractions >= requiredInteractions);
 
-            Object.assign(finishBtn.style, {
+            Object.assign(this.finishBtn.style, {
                 padding: "15px 30px",
-                background: canFinish ? "#48bb78" : "#a0aec0",
+                background: canFinish ? (isCompleted && !isLastChapter ? "#3182ce" : "#48bb78") : "#a0aec0",
                 color: "white", border: "none",
                 borderRadius: "8px", fontSize: "1rem", fontWeight: "bold",
-                cursor: canFinish ? (isCompleted ? "default" : "pointer") : "not-allowed",
+                cursor: canFinish ? "pointer" : "not-allowed",
                 opacity: canFinish ? "1" : "0.6",
-                boxShadow: canFinish ? "0 4px 6px rgba(72, 187, 120, 0.3)" : "none"
+                boxShadow: canFinish ? "0 4px 6px rgba(0,0,0,0.2)" : "none"
             });
 
-            finishBtn.disabled = !canFinish && !isCompleted;
+            this.finishBtn.disabled = !canFinish;
 
-            finishBtn.onclick = () => {
-                if (isCompleted) return; // Already done
+            this.finishBtn.onclick = () => {
+                if (!isCompleted) {
+                    dbManager.completeModule(module.id);
+                }
 
-                dbManager.completeModule(module.id);
-                // Re-render to update Sidebar and Button State
+                if (!isLastChapter) {
+                    // Navigate to Next Chapter Immediately
+                    this.currentChapter = this.chapters[currentChIdx + 1];
+                    this.currentModuleIndex = 0;
+                }
+
                 this.render();
             };
 
-            nextWrapper.appendChild(finishBtn);
+            nextWrapper.appendChild(this.finishBtn);
         }
         main.appendChild(nextWrapper);
 

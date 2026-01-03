@@ -110,8 +110,7 @@ export class LabScene {
         }
 
         // 8. UI
-        // Widgets replaced by ControlPanel
-        // this.createTextWidget();
+        this.createTextWidget();
         // this.createDebugWidget();
 
         // Events
@@ -985,11 +984,14 @@ export class LabScene {
     updateTextContent(title, body, btnText) {
         if (this.textTitle) this.textTitle.innerText = title;
         if (this.textBody) this.textBody.innerHTML = body;
-        if (btnText) {
-            this.continueBtn.style.display = "inline-block";
-            this.continueBtn.innerText = btnText;
-        } else {
-            this.continueBtn.style.display = "none";
+
+        if (this.continueBtn) {
+            if (btnText) {
+                this.continueBtn.style.display = "inline-block";
+                this.continueBtn.innerText = btnText;
+            } else {
+                this.continueBtn.style.display = "none";
+            }
         }
     }
 
