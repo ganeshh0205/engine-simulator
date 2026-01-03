@@ -48,7 +48,7 @@ export class LabScene {
 
         // Physics
         this.physics = new PhysicsEngine();
-        this.physics.inputs.throttle = 20.0;
+        this.physics.inputs.throttle = 0.0;
 
         this.animationId = null;
         this.lastTime = performance.now();
@@ -110,8 +110,9 @@ export class LabScene {
         }
 
         // 8. UI
-        this.createTextWidget();
-        this.createDebugWidget();
+        // Widgets replaced by ControlPanel
+        // this.createTextWidget();
+        // this.createDebugWidget();
 
         // Events
         this.renderer.domElement.addEventListener('mousedown', this.onMouseDownBound);
@@ -660,11 +661,8 @@ export class LabScene {
     }
 
     handleTurbineScene(index) {
-        // Isolate Turbine + Shaft + Combustor (for context)
-        // User asked for "only combustion" before, but for Turbine we might need context?
-        // Let's stick to "Turbine" and "Shaft".
-        this.isolateComponent(["Turbine", "Shaft", "Combustor"]);
-        // We keep Combustor visible but maybe fade it? Or just keep it to show where gas comes from.
+        // Isolate Turbine + Shaft ONLY (User requested separation)
+        this.isolateComponent(["Turbine", "Shaft"]);
 
         // Reset Visuals
         this.atmosphereGroup.visible = false;
@@ -673,7 +671,8 @@ export class LabScene {
         if (!this.turbineGroup) this.setupTurbineViz();
         this.turbineGroup.visible = true;
 
-        if (this.combustionGroup) this.combustionGroup.visible = true; // Show fire feeding turbine
+        if (this.combustionGroup) this.combustionGroup.visible = false; // Hide fire
+        if (this.flowParticles) this.flowParticles.visible = false;
         if (this.flowParticles) this.flowParticles.visible = false;
 
         this.controls.enableRotate = true;
@@ -727,10 +726,12 @@ export class LabScene {
 
     setupTurbineViz() {
         this.turbineGroup = new THREE.Group();
-        this.scene.add(this.turbineGroup);
+        // Attach to Engine!
+        if (this.engine) this.engine.add(this.turbineGroup);
+        else this.scene.add(this.turbineGroup);
 
         // Particles for Turbine Flow
-        // Start from Combustor Exit (Z ~ 14) -> End of Turbine (Z ~ 18)
+        // Start from Combustor Exit (X ~ 8.9) -> End of Turbine (X ~ 12.1)
         const count = 2000;
         const geom = new THREE.BufferGeometry();
         const pos = new Float32Array(count * 3);
@@ -738,14 +739,19 @@ export class LabScene {
         const userData = [];
 
         for (let i = 0; i < count; i++) {
-            pos[i * 3] = (Math.random() - 0.5) * 2;
-            pos[i * 3 + 1] = (Math.random() - 0.5) * 2;
-            pos[i * 3 + 2] = 14 + Math.random() * 4; // 14 to 18
+            const r = 1.0 + Math.random() * 0.5;
+            const theta = Math.random() * Math.PI * 2;
+
+            // Axial X
+            pos[i * 3] = 8.9 + Math.random() * 3.2; // 8.9 to 12.1
+            // Radial Y/Z
+            pos[i * 3 + 1] = r * Math.cos(theta);
+            pos[i * 3 + 2] = r * Math.sin(theta);
 
             userData.push({
-                angle: Math.random() * Math.PI * 2,
+                angle: theta,
                 speed: 5.0 + Math.random() * 2.0, // Fast
-                radius: 1.0 + Math.random() * 0.5
+                radius: r
             });
         }
         geom.setAttribute('position', new THREE.BufferAttribute(pos, 3));
@@ -808,10 +814,12 @@ export class LabScene {
 
     setupNozzleViz() {
         this.nozzleGroup = new THREE.Group();
-        this.scene.add(this.nozzleGroup);
+        // Attach to Engine!
+        if (this.engine) this.engine.add(this.nozzleGroup);
+        else this.scene.add(this.nozzleGroup);
 
         // Particles for Nozzle Flow
-        // Start from Turbine Exit (Z ~ 18) -> Far Exit (Z ~ 30)
+        // Start from Turbine Exit (X ~ 12.1) -> Far Exit (X ~ 16+)
         const count = 2000;
         const geom = new THREE.BufferGeometry();
         const pos = new Float32Array(count * 3);
@@ -819,9 +827,13 @@ export class LabScene {
         const userData = [];
 
         for (let i = 0; i < count; i++) {
-            pos[i * 3] = (Math.random() - 0.5) * 1.5;
-            pos[i * 3 + 1] = (Math.random() - 0.5) * 1.5;
-            pos[i * 3 + 2] = 18 + Math.random() * 2; // Start near entrance
+            // Pos Radial
+            const r = Math.random() * 0.8;
+            const th = Math.random() * 2 * Math.PI;
+
+            pos[i * 3] = 12.1 + Math.random() * 2; // Start near entrance
+            pos[i * 3 + 1] = r * Math.cos(th);
+            pos[i * 3 + 2] = r * Math.sin(th);
 
             userData.push({
                 speed: 10.0 + Math.random() * 5.0, // Initial speed
@@ -1024,6 +1036,34 @@ export class LabScene {
             this.animateNozzle(dt);
         }
 
+        // HEAT GLOW VISUALIZATION
+        if (this.engine && this.physics && this.physics.state) {
+            const s = this.physics.state;
+            const getHeatColor = (temp, minT, maxT) => {
+                const t = Math.max(0, Math.min(1, (temp - minT) / (maxT - minT)));
+                // Blackbodyish: Red -> Orange -> Yellow
+                return { r: Math.min(1, t * 2.0), g: Math.min(1, Math.max(0, (t - 0.3) * 1.5)), b: Math.min(1, Math.max(0, (t - 0.8) * 3.0)) };
+            };
+
+            const cComb = getHeatColor(s.t4, 400, 2000);
+            const cExh = getHeatColor(s.egt, 300, 1000);
+
+            this.engine.traverse((child) => {
+                if (child.isMesh && child.material && child.material.emissive) {
+                    // Combustor
+                    if (child.parent && child.parent.name.includes("Combustor")) {
+                        child.material.emissive.setRGB(cComb.r, cComb.g, cComb.b);
+                        child.material.emissiveIntensity = 0.5 + cComb.r;
+                    }
+                    // Turbine/Nozzle
+                    if (child.parent && (child.parent.name.includes("Turbine") || child.parent.name.includes("Nozzle"))) {
+                        child.material.emissive.setRGB(cExh.r, cExh.g, cExh.b);
+                        child.material.emissiveIntensity = 0.5 + cExh.r;
+                    }
+                }
+            });
+        }
+
         this.controls.update();
         this.composer.render();
     }
@@ -1213,7 +1253,13 @@ export class LabScene {
             // Slow down in Can (Combustion)
             if (axial > 6.6) speed *= 0.8;
 
-            axial += speed * dt;
+            // FLOW SCALAR (Combustor)
+            let flowScalar = 0.0;
+            if (this.physics && this.physics.state) {
+                flowScalar = this.physics.state.rpm / 100.0;
+            }
+
+            axial += speed * dt * flowScalar;
 
             // Wrapping
             if (axial > 9.0) {
@@ -1249,14 +1295,28 @@ export class LabScene {
 
             // Color Logic (Burn)
             // If axial > 6.8 (In Can) and isBurn
-            if (isBurn && axial > 6.8) {
-                // Transition Blue -> Red
+
+            // PHYSICS CHECK: Only burn if Ignition AND T4 is high
+            let t4 = 300;
+            let ignition = false;
+            if (this.physics) {
+                t4 = this.physics.stations[4].T;
+                ignition = this.physics.inputs.ignition;
+            }
+
+            if (isBurn && axial > 6.8 && ignition && t4 > 400) {
+                // Transition Blue -> Red/White based on T4
+                // Max T4 ~ 1800K
+                const heatP = Math.min((t4 - 400) / 1400.0, 1.0);
+
                 const burnP = Math.min((axial - 6.8) / 1.0, 1.0);
-                colors[ix] = 0.3 + burnP * 0.7; // -> 1.0
-                colors[ix + 1] = 0.2 + burnP * 0.3; // -> 0.5
-                colors[ix + 2] = 1.0 - burnP * 1.0; // -> 0.0
+
+                // Intensity driven by HeatP
+                colors[ix] = 0.3 + burnP * 0.7 * heatP;
+                colors[ix + 1] = 0.2 + burnP * 0.5 * heatP;
+                colors[ix + 2] = 1.0 - burnP * 1.0 * heatP; // Turns from Blue to Yellow/Red
             } else {
-                // Air Blue
+                // Air Blue (Cold Flow)
                 colors[ix] = 0.3; colors[ix + 1] = 0.2; colors[ix + 2] = 1.0;
             }
         }
@@ -1268,84 +1328,120 @@ export class LabScene {
         if (!this.turbineGroup || !this.turbineGroup.visible) return;
 
         // 1. Mechanical Rotation (Turbine Drives Everything)
+        // Physics RPM (0-100%) -> Rad/s
+        let rpm = 0;
+        if (this.physics && this.physics.state) {
+            rpm = this.physics.state.rpm;
+        }
+
+        // 100% RPM = ~60 rad/s visually
+        const rotSpeed = (rpm / 100.0) * 60.0;
+
         // Rotate Turbine Group
         this.engine.traverse(obj => {
             // Find Turbine parts
             if (obj.parent && obj.parent.name === "Turbine") {
                 // Rotate blades (Rotor)
                 if (!obj.name.includes("Stator") && !obj.name.includes("Vane") && !obj.name.includes("Case")) {
-                    if (obj.rotation) obj.rotation.x += 15.0 * dt;
+                    if (obj.rotation) obj.rotation.x += rotSpeed * dt;
                 }
             }
             // VISUAL TRICK: Rotate Compressor too! (Shaft Link)
             if (obj.parent && obj.parent.name === "Compressor") {
                 if (!obj.name.includes("Stator") && !obj.name.includes("Vane") && !obj.name.includes("Case")) {
-                    if (obj.rotation) obj.rotation.x += 15.0 * dt;
+                    if (obj.rotation) obj.rotation.x += rotSpeed * dt;
                 }
             }
             // Shaft
             if (obj.name === "Shaft" || obj.name === "CentralShaft") {
-                if (obj.rotation) obj.rotation.x += 15.0 * dt;
+                if (obj.rotation) obj.rotation.x += rotSpeed * dt;
             }
         });
 
-        // 2. Particle Physics
+        // 2. Particle Physics - Swirl & Expansion
         if (this.turbPart) {
             const positions = this.turbPart.geometry.attributes.position.array;
             const colors = this.turbPart.geometry.attributes.color.array; // We need color array
             const configs = this.turbPart.userData.config;
 
+            // Turbine Geometry constants
+            const tStart = 8.9;
+            const tEnd = 12.1;
+            const tLen = 3.2;
+
+            // Radius Expansion:
+            // Hub: 0.45 -> 0.70
+            // Tip: 1.00 -> 1.55
+
             for (let i = 0; i < configs.length; i++) {
                 const ix = i * 3;
-                let x = positions[ix];
-                let y = positions[ix + 1];
-                let z = positions[ix + 2];
+                let ax = positions[ix]; // Axial (X)
 
-                // Move +Z (14 -> 18)
-                const speed = configs[i].speed;
-                z += speed * dt;
-
-                // Wrapping
-                if (z > 18) {
-                    z = 14;
-                    // Reset Radius
-                    const r = 1.0 + Math.random() * 0.5;
-                    configs[i].radius = r;
-                    const theta = Math.random() * Math.PI * 2;
-                    x = r * Math.cos(theta);
-                    y = r * Math.sin(theta);
+                // Advance Axial
+                // FLOW SCALAR
+                let flowScalar = 0.0;
+                if (this.physics && this.physics.state) {
+                    flowScalar = this.physics.state.rpm / 100.0;
                 }
 
-                // Spiral Motion (Energy Extraction)
-                // As Z increases, spiral can get tighter or change?
-                // Turbine blades turn flow.
-                const angleSpeed = 5.0; // Spin with blades
-                const r = configs[i].radius;
-                const theta = Math.atan2(y, x) + angleSpeed * dt;
+                let speed = configs[i].speed;
+                ax += speed * dt * flowScalar; // STOP if flow is 0
 
-                x = r * Math.cos(theta);
-                y = r * Math.sin(theta);
+                // Wrapping
+                if (ax > tEnd) {
+                    ax = tStart;
+                    // Reset Speed/Radius Logic if needed
+                    configs[i].tOffset = Math.random();
+                }
 
-                // Color Change (Temp Drop)
-                // Start (Z 14): Red/Orange (Hot)
-                // End (Z 18): Yellow/Blue (Cooler/Work Done)
-                const progress = (z - 14) / 4.0; // 0 to 1
+                // Calculate Progress t (0 to 1)
+                const t = Math.max(0, Math.min(1, (ax - tStart) / tLen));
 
-                // Lerp Color:
-                // Start: 1.0, 0.5, 0.0 (Orange)
-                // End:   0.8, 0.8, 0.2 (Yellowish)
-                // Or Blueish? User narrative: "Gas temperature drops"
+                // Swirl Logic
+                // We track angle in config to accumulate rotation
+                let theta = configs[i].angle;
+                const swirlSpeed = 15.0; // Rad/s (Match Rotor)
+                theta += swirlSpeed * dt;
+                configs[i].angle = theta; // Save state!
 
-                const rStart = 1.0, gStart = 0.4, bStart = 0.0;
-                const rEnd = 0.3, gEnd = 0.3, bEnd = 0.8; // Blue-ish (Cool)
+                // Radius Logic (Expansion)
+                // Interpolate Engine Bounds
+                const hubR = 0.45 + (0.70 - 0.45) * t;
+                const tipR = 1.00 + (1.55 - 1.00) * t;
 
-                colors[ix] = rStart * (1 - progress) + rEnd * progress;
-                colors[ix + 1] = gStart * (1 - progress) + gEnd * progress;
-                colors[ix + 2] = bStart * (1 - progress) + bEnd * progress;
+                // Particle restricted to annulus
+                // We assign a relative radial position 'rRel' (0 to 1) at spawn
+                const rRel = configs[i].rRel || 0.5; // Fallback
+                const currentR = hubR + rRel * (tipR - hubR);
 
-                positions[ix] = x;
+                // Apply Swirl Position
+                const y = currentR * Math.cos(theta); // Match Cos/Sin Y/Z
+                const z = currentR * Math.sin(theta);
+
+                positions[ix] = ax;
                 positions[ix + 1] = y;
                 positions[ix + 2] = z;
+
+                // Color Change (Temp Drop)
+                // PHYSICS LINK: Turbine Entry Temp (T4) -> Exit (T5)
+                let t4 = 300, t5 = 300;
+                if (this.physics && this.physics.state) {
+                    t4 = this.physics.stations[4].T;
+                    t5 = this.physics.state.egt;
+                }
+
+                // Interpolate Temp along Turbine length (t)
+                const localT = t4 * (1 - t) + t5 * t;
+                const tNorm = Math.min(Math.max((localT - 300) / 1200.0, 0.0), 1.0); // 300-1500K Range
+
+                // Red/Orange -> Blue/Dark
+                const rC = tNorm;
+                const gC = tNorm * 0.5; // Orange tint
+                const bC = 0.2 + (1.0 - tNorm) * 0.8; // Blue when cold
+
+                colors[ix] = rC;
+                colors[ix + 1] = gC;
+                colors[ix + 2] = bC;
             }
             this.turbPart.geometry.attributes.position.needsUpdate = true;
             this.turbPart.geometry.attributes.color.needsUpdate = true;
@@ -1360,50 +1456,112 @@ export class LabScene {
             const colors = this.nozPart.geometry.attributes.color.array;
             const configs = this.nozPart.userData.config;
 
+            // Nozzle Geometry Constants
+            const nStart = 12.1;
+            const nLen = 4.0; // Extend well past exit (2.0 structure + 2.0 plume)
+
+            // Radius Profiles
+            // Inner (Cone): 0.7 -> 0.0 (at Length 2.0)
+            // Outer (Shell): 1.55 -> 0.95 (at Length 2.0)
+
             for (let i = 0; i < configs.length; i++) {
                 const ix = i * 3;
-                let x = positions[ix];
-                let y = positions[ix + 1];
-                let z = positions[ix + 2];
+                let ax = positions[ix];
 
                 // Physics: Expansion & Acceleration
-                // Z Range: 18 -> 30
-                // Acceleration increases with Z
+                // FLOW SCALAR:
+                let flowScalar = 0.0;
+                if (this.physics && this.physics.state) {
+                    flowScalar = this.physics.state.rpm / 100.0;
+                }
 
                 let speed = configs[i].speed;
                 const accel = configs[i].accel;
 
-                // Increase speed as it moves downstream (Expansion)
-                speed += accel * dt;
-                z += speed * dt;
+                // Only accelerate if there is flow
+                if (flowScalar > 0.01) {
+                    speed += accel * dt * flowScalar;
+                    ax += speed * dt * flowScalar;
+                }
 
                 // Wrapping
-                if (z > 30) {
-                    z = 18;
+                if (ax > nStart + nLen) {
+                    ax = nStart;
                     speed = 10.0 + Math.random() * 5.0; // Reset speed
                     configs[i].speed = speed;
-
-                    x = (Math.random() - 0.5) * 1.5;
-                    y = (Math.random() - 0.5) * 1.5;
+                    // Reset Radial Relative Pos
+                    configs[i].rRel = Math.random();
+                    configs[i].angle = Math.random() * 2 * Math.PI;
                 }
                 else {
                     configs[i].speed = speed;
                 }
 
-                // Expansion: X/Y move outwards? Or straighten?
-                // Narrative: "Flow is forced backward. Perfectly aligned."
-                // So random X/Y should dampen to 0? Or just stay straight.
-                // Let's DAMPEN lateral motion to simulate "straightening".
-                x *= 0.95;
-                y *= 0.95;
+                // Calculate Geometry Constraints
+                // tGeo: 0 to 1 along the physical nozzle (Length 2.0)
+                // If ax > 14.1, we are in the plume (free expansion)
+                const dist = ax - nStart;
+                const tGeo = Math.min(dist / 2.0, 1.0); // Clamped for geometry
+
+                // Inner Radius (The Cone) -> Avoid this!
+                const rInner = 0.7 * (1.0 - tGeo); // Linear taper 0.7 -> 0
+
+                // Outer Radius (The Shell)
+                // Profile Match: Inlet 1.55 -> Throat 1.25 (at 40%) -> Exit 0.95 (at 100%)
+                let rOuter = 1.55;
+                if (tGeo <= 0.4) {
+                    // Inlet to Throat (0.0 to 0.4)
+                    const tSub = tGeo / 0.4;
+                    rOuter = 1.55 + (1.25 - 1.55) * tSub;
+                } else {
+                    // Throat to Exit (0.4 to 1.0)
+                    const tSub = (tGeo - 0.4) / 0.6;
+                    rOuter = 1.25 + (0.95 - 1.25) * tSub;
+                }
+
+                // Plume Expansion (After Exit)
+                if (dist > 2.0) {
+                    // Inside plume, Inner is 0. Outer expands rapidly.
+
+                    // DYNAMIC EXPANSION:
+                    // If Thrust is high, plume expands more?
+                    // Let's link to Pressure Ratio (state.p3 / p0 approx or RPM)
+                    let pressureFactor = 1.0;
+                    if (this.physics && this.physics.state) {
+                        const rpm = this.physics.state.rpm;
+                        pressureFactor = 1.0 + (rpm / 100.0) * 1.5; // Up to 2.5x expansion at max
+                    }
+
+                    const tPlume = (dist - 2.0);
+                    rOuter = 0.95 + tPlume * 0.5 * pressureFactor; // Expand with Thrust
+                }
+
+                // Place Particle in Annulus (Outside Cone, Inside Shell)
+                const rRel = configs[i].rRel || 0.5;
+                // Add padding: rInner+0.05 to rOuter-0.08 (Keep strictly inside)
+                const r = (rInner + 0.05) + rRel * ((rOuter - 0.08) - (rInner + 0.05));
+
+                // Nozzle straightens the flow (Dampen any swirl)
+                const theta = configs[i].angle; // Fixed angle, no swirl update
+
+                positions[ix] = ax;
+                positions[ix + 1] = r * Math.cos(theta);
+                positions[ix + 2] = r * Math.sin(theta);
 
                 // Color: Hot -> Cool -> Transparent?
-                // Blueish -> White/Transparent exhaust
-                colors[ix] = 0.6; colors[ix + 1] = 0.6; colors[ix + 2] = 1.0;
+                // Link to EGT (T5)
+                let t5 = 300;
+                if (this.physics && this.physics.state) t5 = this.physics.state.egt;
 
-                positions[ix] = x;
-                positions[ix + 1] = y;
-                positions[ix + 2] = z;
+                // 300K (Blue) -> 1000K (Yellow/White)
+                const tNorm = Math.min(Math.max((t5 - 300) / 700.0, 0.0), 1.0);
+
+                // Shock Diamonds at high thrust?
+                const rC = 0.2 + tNorm * 0.8;
+                const gC = 0.2 + tNorm * 0.8;
+                const bC = 1.0 - tNorm * 0.5;
+
+                colors[ix] = rC; colors[ix + 1] = gC; colors[ix + 2] = bC;
             }
             this.nozPart.geometry.attributes.position.needsUpdate = true;
             this.nozPart.geometry.attributes.color.needsUpdate = true;
@@ -1414,21 +1572,25 @@ export class LabScene {
         // Spin the compressor blades (Rotors vs Stators)
         // Rotors (Moving): Spinner, Shaft, Rotor, Blade, Fan
         // Stators (Static): Stator, Vane, Case
+
+        // 1. DYNAMIC ROTATION SPEED
+        let rpm = 0;
+        if (this.physics && this.physics.state) {
+            rpm = this.physics.state.rpm;
+        }
+        // Visual Scaling: 100% RPM = ~60 rad/s
+        const rotSpeed = (rpm / 100.0) * 60.0;
+
         this.engine.traverse(obj => {
             const name = obj.name.toLowerCase();
             // Core rotating parts
             if (name === "spinner" || name === "shaft") {
-                if (obj.rotation) obj.rotation.x += 15.0 * dt;
+                if (obj.rotation) obj.rotation.x += rotSpeed * dt;
             }
             // Compressor parts: Check if it's a rotor or generic blade not explicitly a stator
-            // We assume "Compressor" is the group, so we don't rotate the group itself, just children.
             else if (obj.parent && obj.parent.name === "Compressor") {
-                // Heuristic: If it says "Stator" or "Vane", don't rotate.
-                // If it says "Rotor" or "Blade", rotate.
-                // If unknown, assume Rotor (for visual activity) unless it looks static?
-                // Let's rely on exclusion of Stators.
                 if (!name.includes("stator") && !name.includes("vane") && !name.includes("case")) {
-                    if (obj.rotation) obj.rotation.x += 15.0 * dt;
+                    if (obj.rotation) obj.rotation.x += rotSpeed * dt;
                 }
             }
         });
@@ -1459,18 +1621,20 @@ export class LabScene {
                     continue;
                 }
 
-                // --- PRESSURE / HEAT VISUALIZATION ---
-                // Calculate Heat based on Z progress through compressor
-                // Intake (< 1.1): 0.0
-                // LPC (1.1 - 3.1): 0.0 -> 0.3
-                // HPC (3.1 - 6.0): 0.3 -> 1.0
+                // --- PRESSURE / HEAT VISUALIZATION (PHYSICS LINKED) ---
+                // Get Physics State
+                const P_ratio = (this.physics && this.physics.state) ? (this.physics.state.rpm / 100.0 * 25.0) : 1.0;
+                // Approx PR linked to RPM (0 -> 25)
+
                 let heat = 0;
                 if (z > 1.1) {
-                    if (z < 3.1) {
-                        heat = 0.0 + ((z - 1.1) / 2.0) * 0.3;
-                    } else {
-                        heat = 0.3 + ((z - 3.1) / 2.9) * 0.7;
-                    }
+                    // Base heat on Z progress (Compression Work)
+                    let stageP = 0;
+                    if (z < 3.1) stageP = (z - 1.1) / 2.0; // LPC
+                    else stageP = 0.5 + (z - 3.1) / 2.9 * 0.5; // HPC
+
+                    // Multiply by actual Engine PR (If RPM is low, heat is low!)
+                    heat = stageP * (Math.min(P_ratio, 15.0) / 15.0);
                 }
                 heat = Math.min(Math.max(heat, 0), 1);
 
@@ -1480,11 +1644,19 @@ export class LabScene {
                 colors[ix + 2] = 1.0 - heat * 0.8; // B: Decreases (stays slight for purple)
 
                 // --- 1. AXIAL SPEED (Continuous - No Stops) ---
-                let axialSpeed = 1.5;
+                // FLOW SCALAR (Compressor)
+                let flowScalar = 0.0;
+                if (this.physics && this.physics.state) {
+                    // Non-linear flow at low RPM? 
+                    // Simple linear for visual clarity
+                    flowScalar = this.physics.state.rpm / 100.0;
+                }
+
+                let axialSpeed = 1.5 * flowScalar;
                 // Intake: Faster
-                if (z < 1.1) axialSpeed = 2.5;
+                if (z < 1.1) axialSpeed = 2.5 * flowScalar;
                 // HPC: Slower (Compressed)
-                else if (z > 3.5) axialSpeed = 1.2;
+                else if (z > 3.5) axialSpeed = 1.2 * flowScalar;
 
                 // --- 2. SWIRL LOGIC (Based on proximity to Rotors) ---
                 let omega = 0.5; // Base drift (Stator-like)
@@ -1724,16 +1896,42 @@ export class LabScene {
         }
 
         // --- APPLY MOTION ---
-        hs.theta += omega * dtS;
+        // FLOW SCALAR (Hero)
+        let flowScalar = 0.0;
+        if (this.physics && this.physics.state) {
+            flowScalar = this.physics.state.rpm / 100.0;
+        }
 
-        hp.x = Math.cos(hs.theta) * targetRadius;
-        hp.y = Math.sin(hs.theta) * targetRadius;
-        hp.z += axialSpeed * dtS;
+        if (flowScalar > 0.01) {
+            hs.theta += omega * dtS * flowScalar;
+            hp.x = Math.cos(hs.theta) * targetRadius;
+            hp.y = Math.sin(hs.theta) * targetRadius;
+            hp.z += axialSpeed * dtS * flowScalar;
+        }
 
         // --- COLOR = HEAT ---
-        hs.heat = Math.min(hs.heat, 1.0);
+        // --- COLOR = HEAT ---
+        // Link to Local Temperature (Approximate based on Z)
+        let localTempNorm = 0.0;
+        if (hp.z < 1.1) localTempNorm = 0.0; // Intake
+        else if (hp.z < 6.0) { // Compressor
+            // T3 normalization (300 -> 900K)
+            const t3 = (this.physics && this.physics.stations) ? this.physics.stations[3].T : 300;
+            localTempNorm = (t3 - 300) / 600.0 * (hp.z / 6.0);
+        } else if (hp.z < 9.0) { // Combustor
+            // T4 normalization (900 -> 1800K)
+            const t4 = (this.physics && this.physics.stations) ? this.physics.stations[4].T : 300;
+            localTempNorm = (t4 - 300) / 1500.0;
+        } else { // Turbine/Exhaust
+            // T5 normalization
+            const t5 = (this.physics && this.physics.stations) ? this.physics.stations[5].T : 300;
+            localTempNorm = (t5 - 300) / 1000.0;
+        }
+
+        hs.heat = Math.min(Math.max(localTempNorm, 0), 1.0);
+
         this.heroParticle.material.color.setHSL(
-            0.6 - hs.heat * 0.55, // blue -> orange -> red
+            0.6 - hs.heat * 0.6, // Blue (0.6) -> Red (0.0)
             1.0,
             0.5
         );

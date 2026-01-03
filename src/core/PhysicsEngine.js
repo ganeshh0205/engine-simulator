@@ -4,6 +4,7 @@ export class PhysicsEngine {
         // Inputs
         this.inputs = {
             throttle: 0.0, // 0 to 100%
+            ignition: false, // Engine Start/Stop State
             mach: 0.0,     // Flight Mach Number
             altitude: 0.0, // Feet (Standard Atmosphere)
 
@@ -68,21 +69,82 @@ export class PhysicsEngine {
     }
 
     update(dt) {
-        // 1. Ramp RPM based on Throttle
-        // Simple lag model
-        const targetRPM = this.inputs.throttle;
-        const spoolRate = 20.0; // % per second
+        // --- REALISTIC ENGINE DYNAMICS CONTROLLER ---
 
-        if (this.state.rpm < targetRPM) {
-            this.state.rpm += spoolRate * dt;
-            if (this.state.rpm > targetRPM) this.state.rpm = targetRPM;
-        } else if (this.state.rpm > targetRPM) {
-            this.state.rpm -= spoolRate * dt;
-            if (this.state.rpm < targetRPM) this.state.rpm = targetRPM;
+        // 1. Determine Target RPM based on State
+        let commandRPM = 0.0;
+
+        if (this.inputs.ignition) {
+            // Engine is ON
+            // IDLE is typically 60% N1 for a pure turbojet
+            const IDLE_RPM = 60.0;
+
+            // Map Throttle (0-100%) to Operational Range (IDLE - 100%)
+            // 0% Throttle = IDLE
+            // 100% Throttle = 100% RPM
+            commandRPM = IDLE_RPM + (this.inputs.throttle / 100.0) * (100.0 - IDLE_RPM);
+
+            // Starter Assistance (simulated)
+            // If RPM is low, Starter Motor drives it to ~20%
+            if (this.state.rpm < 20.0) {
+                // Starter torque is high, moves fast to 20%
+                commandRPM = Math.max(commandRPM, 20.0);
+            }
+        } else {
+            // Engine is OFF
+            commandRPM = 0.0; // Spool down
         }
 
-        // 2. Run thermodynamic cycle if running
-        if (this.state.rpm > 5.0) { // Idle minimum usually higher, but logic starts here
+        // 2. Calculate Response Rate (Inertia Simulation)
+        let responseRate = 0.0;
+        const currentRPM = this.state.rpm;
+        const diff = commandRPM - currentRPM;
+
+        // Spool Up/Down Physics
+        if (diff > 0) {
+            // Accelerating
+            if (currentRPM < 20.0 && this.inputs.ignition) {
+                // Starter Motor: Strong Torque
+                responseRate = 25.0; // %/sec
+            } else if (currentRPM < 50.0 && this.inputs.ignition) {
+                // Light-off / Weak acceleration band (Components heavy)
+                responseRate = 18.0;
+            } else {
+                // Active Governor (Fuel Control Unit)
+                // Fast response in power band
+                responseRate = 40.0;
+            }
+        } else {
+            // Decelerating (Drag/Friction)
+            if (currentRPM > 20.0) {
+                // Aerodynamic Drag is high at speed
+                responseRate = 25.0;
+            } else {
+                // Mechanical Friction dominates at low speed
+                responseRate = 10.0;
+            }
+        }
+
+        // 3. Apply Integration
+        // Simple Euler integration for Smooth Lag
+        if (Math.abs(diff) < 0.1) {
+            this.state.rpm = commandRPM;
+        } else {
+            const sign = Math.sign(diff);
+            this.state.rpm += sign * responseRate * dt;
+
+            // Clamp to target if overshot
+            if (sign > 0 && this.state.rpm > commandRPM) this.state.rpm = commandRPM;
+            if (sign < 0 && this.state.rpm < commandRPM) this.state.rpm = commandRPM;
+        }
+
+        // Density Scaling Effect on N1 (Physical Load)
+        // High Altitude (Low Density) -> Less Aerodynamic Drag -> Slightly faster spool?
+        // Or Fuel Control Unit handles it. Kept simple for now.
+
+        // 4. Run Cycle Calculations
+        // Only valid if rotating
+        if (this.state.rpm > 1.0) {
             this.calculateCycle();
         } else {
             this.resetCycle();
@@ -90,198 +152,181 @@ export class PhysicsEngine {
     }
 
     calculateCycle() {
-        const { rpm } = this.state;
-        const { altitude, mach, manualAtmosphere, fuelCV, afr } = this.inputs;
-        const { cpr, tit, massFlow, efficiency } = this.design; // tit is now a limit, not driver!
+        // STRICT 0-D CALCULATION CHAIN (USER VALIDATED)
+        const { rpm } = this.state; // 0-100%
+        let { altitude, mach, manualAtmosphere } = this.inputs;
 
-        // DENSITY EFFICIENCY SCALAR
-        // Lower density reduces component efficiency (Reynolds effect), causing EGT to rise.
-        // We use the previously calculated rho0 (or calculate it relative to Sea Level).
-        // Since rho0 isn't calculated yet, we will do it after ambient step.
-        // Base efficiencies:
-        let effComp = efficiency.comp;
-        let effComb = efficiency.comb;
-        let effTurb = efficiency.turb;
+        // 0. CONSTANTS
+        const GAMMA = 1.4;
+        const CP = 1005.0; // J/kgK
+        const R = 287.0;   // J/kgK
+        const LHV = 43.0e6; // J/kg
+        const RHO_SL = 1.225;
+        // User Specs:
+        const M_DOT_SL_MAX = 12.0; // kg/s
+        const M_DOT_FUEL_MAX = 0.20; // kg/s
 
-        // 0. Ambient Conditions
-        let T0 = this.inputs.ambientTemp;
-        let P0 = this.inputs.ambientPress;
-        // USER REQUEST: Neither T0 NOR P0 should change with Altitude.
-        // Altitude is now purely a "Performance Degradation" factor for the engine, not the inlet.
-        // The previous standard atmosphere calculation for P0 and T0 is removed.
-        // P0 and T0 are now always taken from inputs, effectively making them "manual" for the cycle.
-        // The 'manualAtmosphere' flag might become redundant for T0/P0, but is kept for other potential uses.
+        // 1. AMBIENT & INLET
+        let P0, T0;
+        if (!manualAtmosphere) {
+            // Standard Atmosphere
+            const h = altitude * 0.3048; // meters
+            if (h < 11000) {
+                T0 = 288.15 - 0.0065 * h;
+                P0 = 101325 * Math.pow(1 - 0.0000225577 * h, 5.25588);
+            } else {
+                T0 = 216.65;
+                P0 = 22632 * Math.exp(-0.0001577 * (h - 11000));
+            }
+        } else {
+            P0 = this.inputs.ambientPress;
+            T0 = this.inputs.ambientTemp;
+        }
 
-        let rho0 = P0 / (this.R * T0);
+        // 1.1 Air Density
+        const rho0 = P0 / (R * T0);
+
+        // Update UI Inputs for feedback
+        this.inputs.ambientPress = P0;
+        this.inputs.ambientTemp = T0;
         this.inputs.ambientDensity = rho0;
         this.state.airDensityInlet = rho0;
 
-        // --- ALTITUDE EGT EFFECT ---
-        // Since P0/Rho0 are constant, we must use Altitude DIRECTLY to simulate the "Thin Air" efficiency loss.
-        // We simulate a "Virtual Density Ratio" just for the efficiency curve.
-        const altM = altitude * 0.3048;
-        // Standard Atmosphere Density Model approximation for scalar:
-        const virtualDensityRatio = Math.pow((1 - 0.0000225577 * altM), 4.2559); // Simulating density drop
+        // 1.2 Inlet Velocity
+        const V0 = mach * Math.sqrt(GAMMA * R * T0);
 
-        const densityRatio = Math.max(0.2, virtualDensityRatio);
-        const effFactor = Math.pow(densityRatio, 0.05); // Subtle curve
+        // 2. THROTTLE -> SPOOL SPEED (N1)
+        // N1 (0.0 - 1.0)
+        let N1 = this.state.rpm / 100.0;
+        if (N1 < 0) N1 = 0;
 
-        const currentEffComp = effComp * effFactor;
-        const currentEffTurb = effTurb * effFactor;
+        // 3. AIR MASS FLOW
+        // m_dot = m_sl_max * N1 * (rho0 / rho_sl)
+        let m_a = M_DOT_SL_MAX * N1 * (rho0 / RHO_SL);
+        if (m_a < 0.001) m_a = 0;
 
+        // 4. COMPRESSOR
+        // 4.1 Pressure Ratio: pi_c = 1 + 8 * N1^3.5 (Lower PR at idle for realistic thrust)
+        const pi_c = 1.0 + 8.0 * Math.pow(N1, 3.5);
 
-        // 2. Intake
-        const r = Math.pow(1 + 0.2 * mach * mach, 3.5);
-        const P2 = P0 * r;
-        const T2 = T0 * (1 + 0.2 * mach * mach);
+        // 4.2 Exit Pressure
+        const P3 = P0 * pi_c;
 
-        // --- TURBOFAN SPLIT ---
-        // Calc Mass Flow
-        let rhoInlet = P2 / (this.R * T2);
-        const totalMassFlow = massFlow * (rhoInlet / 1.225) * (rpm / 100);
+        // 4.3 Exit Temp (Isentropic)
+        // T3 = T0 * pi_c^((g-1)/g)
+        const T3 = T0 * Math.pow(pi_c, (GAMMA - 1) / GAMMA);
 
-        const bpr = this.design.bypassRatio || 0; // 0 for Turbojet
-        const m_core = totalMassFlow / (1 + bpr);
-        const m_bypass = totalMassFlow - m_core;
-        // 3. Compressor
-        // PR scales with RPM
-        // Simple scaling: PR = 1 + (DesignPR - 1) * (RPM/100)^2
-        const currentPR = 1 + (cpr - 1) * Math.pow(rpm / 100, 2);
-
-        // --- TYPE SPECIFIC LOGIC ---
-        let P3, T3;
-
-        if (this.design.bypassRatio === undefined) this.design.bypassRatio = 0; // Default
-
-        // 3a. RAMJET Logic
-        if (cpr < 2.0 && this.design.type === 'Ramjet') {
-            // Ramjet relies fully on P2 (Ram Pressure)
-            // No compressor.
-            P3 = P2 * 0.95; // Pressure recovery loss
-            T3 = T2;
-        }
-        // 3b. ROCKET Logic
-        else if (this.design.type === 'Rocket') {
-            // Rocket ignores intake
-            // Chamber Pressure is fixed by turbopump (Throttle dependent)
-            // P3 = Chamber Pressure
-            P3 = 3000000 * (rpm / 100.0); // 30 Bar max
-            T3 = 300; // Propellant temp?
-
-            // Combustor creates massive Pressure/Temp
-            this.inputs.ambientDensity = 0.0; // Space compatible (no drag calc used here directly)
-        }
-        else {
-            // Standard Turbojet/Fan
-            P3 = P2 * currentPR;
-            // T3 ideal = T2 * PR^((g-1)/g)
-            // T3 real = T2 * (1 + (PR^0.286 - 1) / eff)
-            const tempRatio = 1 + (Math.pow(currentPR, 0.286) - 1) / currentEffComp;
-            T3 = T2 * tempRatio;
+        // 5. FUEL FLOW
+        // Realistic Schedule: N^2 scaling (Leans out at idle)
+        let m_f = 0;
+        if (this.inputs.ignition && N1 > 0.05) {
+            m_f = M_DOT_FUEL_MAX * Math.pow(N1, 2.0);
         }
 
-        // 4. Combustor
-        const P4 = P3 * effComb * this.inputs.chamberDiffuser;
-        const combustionIntensity = 0.6 + 0.4 * (rpm / 100.0);
+        // 6. COMBUSTION
+        let T4 = T3;
+        if (m_a > 0.001) {
+            // Efficiency checks
+            let q_comb = (m_f * LHV) / (m_a * CP);
+            // Low RPM efficiency penalty
+            if (N1 < 0.6) q_comb *= 0.9;
 
-        // Heat added to CORE mass flow only
-        // q = (Fuel / m_core) * CV? 
-        // User AFR is usually defined as Core AFR for combustion stability.
-        // So fuelFlow = m_core / afr.
-        const fuelFlowVal = m_core / afr;
+            T4 = T3 + q_comb;
+        }
+        // Material Limit
+        if (T4 > 2200) T4 = 2200;
 
-        // Temperature Rise
-        // q = (1/AFR) * CV * eff
-        const q_comb = (1.0 / afr) * fuelCV * efficiency.comb * combustionIntensity;
-        let T4 = T3 + (q_comb / this.CP);
+        // 7. TURBINE
+        // 7.1 Compressor Work: Wc = CP * (T3 - T0)
+        // (Note: User formula specified T0, keeping simple)
+        const Wc = CP * (T3 - T0);
 
-        // 5. Turbine
-        // Work Balance: Turbine drives Core Comp AND Fan (if Turbofan) across shafts
-        // For simple model, assume "Gas Generator" drives everything.
-        // Work Required = W_comp_core + W_fan
+        // 7.2 Turbine Drop
+        const delta_Tt = Wc / CP;
 
-        // Fan Settings (Simplified)
-        const fpr = 1.6; // Fan Pressure Ratio (Typical for high bypass)
-        const currentFPR = 1 + (fpr - 1) * Math.pow(rpm / 100, 2); // Scale with RPM
+        // 7.3 EGT (T5)
+        let T5 = T4 - delta_Tt;
+        // Clamp physical limit
+        if (T5 < T0) T5 = T0;
 
-        const coreCompWork = m_core * this.CP * (T3 - T2);
+        // 8. NOZZLE
+        // 8.1 Pressure at Turbine Exit (P5)
+        // Assume Turbine Expansion is linked to Temp Drop Isentropically
+        // P5 = P4 * (T5 / T4)^(g/(g-1))
+        const g_exp = GAMMA / (GAMMA - 1);
+        let P5 = P3 * Math.pow(T5 / T4, g_exp);
 
-        let fanWork = 0;
-        if (bpr > 0) {
-            // Work to compress Bypass Air
-            // T_fan_exit = T2 * (1 + (FPR^0.286 - 1)/eff_fan)
-            const T_bypass_exit = T2 * (1 + (Math.pow(currentFPR, 0.286) - 1) / 0.9); // 0.9 Fan Eff
-            fanWork = m_bypass * this.CP * (T_bypass_exit - T2);
+        // Nozzle Pressure Ratio (NPR) = P5 / P0
+        const NPR = P5 / P0;
+
+        // 8.2 Jet Velocity
+        // Ideally expanded to P0 (if NPR > 1)
+        let Vj = 0;
+        let T8 = T5; // Static Temp at Exit
+
+        if (NPR > 1.0) {
+            // Unchoked / Choked Logic (Simplified: Perfect Expansion to P0 or P_crit)
+            // For simple turbojet signal, assume expansion to P0 for now (Convergent-Divergent Ideal)
+
+            // T8 = T5 * (1 / NPR)^((g-1)/g)
+            T8 = T5 * Math.pow(1.0 / NPR, (GAMMA - 1) / GAMMA);
+
+            // Velocity = sqrt(2 * CP * (T5 - T8))
+            // Check for valid delta
+            const dH = Math.max(0, T5 - T8);
+            Vj = Math.sqrt(2 * CP * dH);
+        } else {
+            // No pressure deficit to drive flow? 
+            // Subsonic entrainment or just negligible.
+            Vj = 0;
         }
 
-        const totalWorkReq = coreCompWork + fanWork;
-
-        // Turbine Drop (acting on m_core)
-        // m_core * CP * (T4 - T5) = TotalWork / mech_eff
-        let turbDeltaT = 0;
-        if (m_core > 0.001) {
-            turbDeltaT = (totalWorkReq / 0.99) / (m_core * this.CP);
-        }
-        const T5 = T4 - turbDeltaT;
-
-        // Check if Turbine Choked/Stalled (T5 < T0?)
-        // If T5 drops too low, engine stalls (Not enough energy).
-
-        const pressureRatioTurb = Math.pow(T5 / T4, 3.5);
-        const P5 = P4 * pressureRatioTurb;
-
-        // 8. Core Nozzle
-        const P8 = P0;
-        let T8 = T5 * Math.pow(P8 / P5, 0.286);
-        if (T8 > T5) T8 = T5; // Physics limits
-        if (T8 < T0) T8 = T0;
-
-        let v_core = Math.sqrt(2 * this.CP * (T5 - T8) * efficiency.nozzle);
-        v_core /= this.inputs.nozzleArea; // Valve Logic
-
-        // --- BYPASS NOZZLE ---
-        let v_bypass = 0;
-        if (bpr > 0) {
-            // Expand Bypass Air from P_fan (P2 * FPR) to P0
-            const P_fan_exit = P2 * currentFPR;
-            // V_bypass = sqrt(2 * CP * T_bypass_exit * (1 - (P0/P_fan)^...))
-            // Re-calc T_bypass_exit
-            const T_bypass_exit = T2 * (1 + (Math.pow(currentFPR, 0.286) - 1) / 0.9);
-
-            // Isentropic Expansion
-            // T_bypass_nozzle = T_bypass_exit * (P0 / P_fan_exit)^0.286
-            let T_bypass_stat = T_bypass_exit * Math.pow(P0 / P_fan_exit, 0.286);
-            if (T_bypass_stat > T_bypass_exit) T_bypass_stat = T_bypass_exit; // No expansion if P0 > P_fan
-
-            v_bypass = Math.sqrt(2 * this.CP * (T_bypass_exit - T_bypass_stat) * 0.95);
+        // 8.2 Area Effect
+        if (this.inputs.nozzleArea > 0.1) {
+            Vj = Vj / Math.sqrt(this.inputs.nozzleArea);
         }
 
-        // Total Thrust
-        // F = m_core * v_core + m_bypass * v_bypass
-        const F_core = m_core * v_core;
-        const F_bypass = m_bypass * v_bypass;
-        const Fg = F_core + F_bypass;
+        // 9. THRUST
+        // F = m_a * (Vj - V0)
+        let Fn = m_a * (Vj - V0);
+        if (Fn < 0) Fn = 0;
 
-        const Vflight = mach * 340.3;
-        const Fram = totalMassFlow * Vflight;
-        const Fn = Fg - Fram;
+        // 10. TSFC
+        // TSFC = (m_f / F) * 3600 * 1000
+        let tsfc = 0.0;
+        if (Fn > 10.0) { // Avoid noise at idle
+            tsfc = (m_f / Fn) * 3600.0 * 1000.0;
+        }
 
-        // Update Stations
-        this.stations[0] = { P: P0, T: T0 };
-        this.stations[2] = { P: P2, T: T2 };
-        this.stations[3] = { P: P3, T: T3 };
-        this.stations[4] = { P: P4, T: T4 };
-        this.stations[5] = { P: P5, T: T5 };
-        this.stations[8] = { P: P8, T: T8 };
+        // UPDATE STATE
+        this.state.thrust = Fn;
 
-        // Output State
-        this.state.thrust = Math.max(0, Fn);
-        this.state.egt = T5;
-        this.state.tsfc = (fuelFlowVal / Fn) * 3600;
-        this.state.fuelFlow = fuelFlowVal;
-        this.state.exitVelocity = v_core; // Core velocity for particles
+        // EGT Thermal Lag (Simulate Metal Mass)
+        // Move towards Target T5 slowly
+        // lag factor ~ 2.0 * dt? 
+        // We don't have dt here. Assuming 60fps (dt ~0.016).
+        // Let's use a simple distinct filter if we don't have dt.
+        // Actually, calculateCycle doesn't take dt.
+        // We'll rely on it being called every frame.
+        // Target is T5.
+        // Current is this.state.egt.
+        // alpha = 0.05 (Slow), 0.5 (Fast).
+        const alpha = 0.05;
+        this.state.egt = this.state.egt + alpha * (T5 - this.state.egt);
+
+        this.state.fuelFlow = m_f;
+        this.state.tsfc = tsfc;
+        this.state.exitVelocity = Vj;
         this.state.p3 = P3;
         this.state.t4 = T4;
+
+        // Output Stations for Plots
+        this.stations[0] = { P: P0, T: T0 };
+        this.stations[2] = { P: P0, T: T0 };
+        this.stations[3] = { P: P3, T: T3 };
+        this.stations[4] = { P: P3, T: T4 };
+        this.stations[5] = { P: P0, T: T5 };
+        this.stations[8] = { P: P0, T: T5 };
     }
 
     resetCycle() {

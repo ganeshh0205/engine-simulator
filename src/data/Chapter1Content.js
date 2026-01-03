@@ -7,7 +7,7 @@ export const Chapter1 = {
             sections: [
                 {
                     type: "explanation",
-                    content: "<strong>Motion</strong> is the fundamental change in an object's position relative to a specific frame of reference over time.<br><br>Detailed Analysis:<br>• **Reference Frame**: The coordinate system used to measure position.<br>• **Position**: Location of an object ($x$).<br>• <span class='si-unit'>SI Unit: Meter (m)</span>."
+                    content: "<strong>Motion</strong> is the fundamental change in an object's position relative to a specific frame of reference over time.<br><br>Detailed Analysis:<br>• **Reference Frame**: The coordinate system used to measure position.<br>• **Position**: Location of an object.<br>"
                 },
                 {
                     type: "intuition_builder",

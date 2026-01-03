@@ -2,6 +2,7 @@ import { Chapter1 } from "../data/Chapter1Content.js";
 import { Chapter2 } from "../data/Chapter2Content.js";
 import { CinematicIntroScene } from "./CinematicIntroScene.js";
 import { LabScene } from "./LabScene.js";
+import { dbManager } from "../core/DatabaseManager.js";
 
 export class MentorView {
     constructor(onNavigate) {
@@ -11,6 +12,7 @@ export class MentorView {
         this.chapters = [Chapter1, Chapter2];
         this.activeScenes = []; // Track 3D scenes to dispose
         this.container = document.createElement("div");
+        this.container.className = "anim-fade-in";
         Object.assign(this.container.style, {
             position: "absolute", top: "0", left: "0", width: "100%", height: "100%",
             background: "#f7fafc", color: "#2d3748", fontFamily: "'Inter', sans-serif",
@@ -133,56 +135,116 @@ export class MentorView {
     renderSidebar() {
         const sidebar = document.createElement("div");
         Object.assign(sidebar.style, {
-            width: "280px", height: "100%", background: "#fff", borderRight: "1px solid #e2e8f0",
-            padding: "20px", display: "flex", flexDirection: "column", overflowY: "auto"
+            width: "320px",
+            height: "100%",
+            background: "rgba(26, 32, 44, 0.95)", // Dark Glass
+            backdropFilter: "blur(20px)",
+            borderRight: "1px solid rgba(255,255,255,0.1)",
+            padding: "30px 20px",
+            display: "flex", flexDirection: "column",
+            boxShadow: "5px 0 15px rgba(0,0,0,0.3)",
+            zIndex: "10",
+            boxSizing: "border-box" // Fix: Include padding in height calculation
         });
 
-        // Loop through Chapters
-        this.chapters.forEach((chapter, chapIdx) => {
-            const title = document.createElement("h2");
-            title.innerText = chapter.title;
-            Object.assign(title.style, {
-                fontSize: "12px", fontWeight: "900", color: "#a0aec0",
-                letterSpacing: "1px", marginBottom: "10px", marginTop: "20px"
+        // Sidebar Title
+        const title = document.createElement("div");
+        title.innerHTML = "PROPULSE<span style='color:#4299e1'>AI</span>";
+        Object.assign(title.style, {
+            fontSize: "1.5rem", fontWeight: "800", color: "white", marginBottom: "40px",
+            letterSpacing: "-1px", paddingLeft: "10px"
+        });
+        sidebar.appendChild(title);
+
+        // Scrollable List
+        const listContainer = document.createElement("div");
+        Object.assign(listContainer.style, { flex: "1", overflowY: "auto", marginTop: "10px", marginBottom: "20px", paddingRight: "5px" });
+        const style = document.createElement("style");
+        style.innerHTML = `#mentor-sidebar-list::-webkit-scrollbar { width: 6px; } #mentor-sidebar-list::-webkit-scrollbar-track { background: rgba(255,255,255,0.05); } #mentor-sidebar-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); borderRadius: 3px; }`;
+        listContainer.appendChild(style);
+        listContainer.id = "mentor-sidebar-list";
+
+        this.chapters.forEach(chapter => {
+            const chTitle = document.createElement("div");
+            chTitle.innerText = chapter.title.toUpperCase();
+            Object.assign(chTitle.style, {
+                fontSize: "0.75rem", fontWeight: "bold", color: "#a0aec0", marginBottom: "15px", // Lighter Gray
+                paddingLeft: "10px", letterSpacing: "1px"
             });
-            sidebar.appendChild(title);
+            listContainer.appendChild(chTitle);
 
             chapter.modules.forEach((mod, modIdx) => {
-                const item = document.createElement("div");
-                item.innerText = mod.title;
-                // Check if this is the active chapter AND active module
+                const item = document.createElement("button"); // Changed to button for semantics
+
+                // Get Status
+                const status = dbManager.getModuleStatus(mod.id);
+                const isLocked = status === 'locked';
+                const isCompleted = status === 'completed';
+
+                // Icon
+                let icon = isCompleted ? "✅" : (isLocked ? "🔒" : "📖");
+
+                item.innerHTML = `<span style="margin-right:10px;">${icon}</span> ${mod.title}`;
+
+                // Check active
                 const isActive = (chapter === this.currentChapter) && (modIdx === this.currentModuleIndex);
 
                 Object.assign(item.style, {
-                    padding: "12px 16px", borderRadius: "8px", marginBottom: "8px", cursor: "pointer",
-                    background: isActive ? "#ebf8ff" : "transparent",
-                    color: isActive ? "#3182ce" : "#4a5568",
-                    fontWeight: isActive ? "600" : "400",
-                    transition: "all 0.2s"
+                    width: "100%", textAlign: "left",
+                    padding: "12px 16px", borderRadius: "12px", marginBottom: "10px",
+                    cursor: isLocked ? "not-allowed" : "pointer",
+                    background: isActive ? "linear-gradient(90deg, #3182ce 0%, #2b6cb0 100%)" : "transparent",
+                    color: isActive ? "white" : (isLocked ? "#718096" : "#cbd5e0"),
+                    fontWeight: isActive ? "600" : "500",
+                    border: "none", fontSize: "0.9rem", transition: "all 0.2s",
+                    opacity: isLocked ? "0.6" : "1.0",
+                    pointerEvents: isLocked ? "none" : "auto",
+                    boxShadow: isActive ? "0 4px 6px rgba(0,0,0,0.2)" : "none",
+                    outline: "none"
                 });
-                item.onclick = () => {
-                    this.currentChapter = chapter;
-                    this.currentModuleIndex = modIdx;
-                    this.render();
-                };
-                sidebar.appendChild(item);
+
+                if (isLocked) {
+                    item.style.filter = "grayscale(100%)"; item.style.opacity = "0.6";
+                    // Add lock icon overlay
+                    const lockOverlay = document.createElement("div");
+                    lockOverlay.innerHTML = '🔒';
+                    Object.assign(lockOverlay.style, { position: "absolute", right: "15px", opacity: "0.5" });
+                    item.appendChild(lockOverlay);
+                } else {
+                    item.onmouseover = () => { if (!isActive) item.style.background = "rgba(255,255,255,0.05)"; };
+                    item.onmouseout = () => { if (!isActive) item.style.background = "transparent"; };
+                    item.onclick = () => {
+                        this.currentChapter = chapter;
+                        this.currentModuleIndex = modIdx;
+                        this.render();
+                    };
+                }
+                listContainer.appendChild(item);
             });
         });
+        sidebar.appendChild(listContainer);
 
         // Bottom: Back to Home
-        const spacer = document.createElement("div");
-        spacer.style.flex = "1";
-        sidebar.appendChild(spacer);
-
         const homeBtn = document.createElement("button");
-        homeBtn.innerText = "← MAIN MENU";
+        homeBtn.innerHTML = "← MAIN MENU";
         Object.assign(homeBtn.style, {
-            padding: "10px", border: "1px solid #e2e8f0", background: "transparent",
-            borderRadius: "6px", cursor: "pointer", color: "#718096", fontSize: "12px", fontWeight: "bold"
+            width: "100%", padding: "15px",
+            marginTop: "10px", // Spacing from list
+            border: "1px solid rgba(255,255,255,0.2)",
+            background: "rgba(0,0,0,0.3)",
+            borderRadius: "12px",
+            cursor: "pointer",
+            color: "#a0aec0",
+            fontSize: "0.9rem", fontWeight: "bold",
+            transition: "all 0.3s",
+            flexShrink: "0" // Prevent shrinking
         });
+        homeBtn.onmouseover = () => { homeBtn.style.borderColor = "white"; homeBtn.style.color = "white"; };
+        homeBtn.onmouseout = () => { homeBtn.style.borderColor = "rgba(255,255,255,0.2)"; homeBtn.style.color = "#a0aec0"; };
+
         homeBtn.onclick = () => {
             this.container.remove();
-            location.reload();
+            if (this.onNavigate) this.onNavigate("HOME");
         };
         sidebar.appendChild(homeBtn);
 
@@ -208,39 +270,53 @@ export class MentorView {
         Object.assign(header.style, { fontSize: "2.5rem", fontWeight: "800", color: "#2d3748", marginBottom: "30px", borderBottom: "2px solid #3182ce", paddingBottom: "10px", display: "inline-block" });
         main.appendChild(header);
 
-        // Sections
+        // --- PROGRESSION LOGIC ---
+        let requiredInteractions = 0;
+        let completedInteractions = 0;
+
+        sections.forEach(sec => {
+            if (sec.type === "questions") {
+                requiredInteractions += sec.questions ? sec.questions.length : 0;
+            } else if (sec.type === "concept_check") {
+                requiredInteractions++;
+            }
+        });
+
+        const checkCompletion = () => {
+            if (completedInteractions >= requiredInteractions) {
+                if (this.nextBtn) {
+                    this.nextBtn.disabled = false;
+                    this.nextBtn.style.opacity = "1";
+                    this.nextBtn.style.cursor = "pointer";
+                    this.nextBtn.innerText = "NEXT MODULE →";
+                }
+            }
+        };
+
+        // Sections Rendering
         sections.forEach(sec => {
             const block = document.createElement("div");
             block.style.marginBottom = "40px";
 
             switch (sec.type) {
                 case "cinematic_scene":
-                    // Full-screen 3D Scene
                     const sceneWrapper = document.createElement("div");
                     Object.assign(sceneWrapper.style, {
                         width: "100%", height: "600px", background: "black",
                         borderRadius: "12px", overflow: "hidden", position: "relative", marginBottom: "40px"
                     });
-
-                    // Initialize Scene
-                    // We must do this after append, or pass the element
                     block.appendChild(sceneWrapper);
-
-                    // Delay instantiation slightly to ensure DOM is ready? No, synchronous append is fine.
                     const scene = new CinematicIntroScene(sceneWrapper, sec);
                     this.activeScenes.push(scene);
                     break;
 
                 case "lab_scene":
-                    // Full-screen Lab Scene
                     const labWrapper = document.createElement("div");
                     Object.assign(labWrapper.style, {
                         width: "100%", height: "600px", background: "black",
                         borderRadius: "12px", overflow: "hidden", position: "relative", marginBottom: "40px"
                     });
-
                     block.appendChild(labWrapper);
-
                     const labScene = new LabScene(labWrapper, sec);
                     this.activeScenes.push(labScene);
                     break;
@@ -254,8 +330,6 @@ export class MentorView {
 
                 case "visual_grounding":
                     let visualHtml = "";
-
-                    // Removed inline style injection from here
                     if (sec.visual && sec.visual.type === "svg_scene") {
                         visualHtml = `
                             <div style="background: white; border-radius: 12px; padding: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); border: 1px solid #e2e8f0; margin-bottom: 0px;">
@@ -263,9 +337,7 @@ export class MentorView {
                                 <div style="font-size: 0.85rem; color: #4a5568; font-style: italic; text-align: center; margin-top: 10px;">${sec.visual.caption}</div>
                             </div>
                         `;
-                    }
-                    else if (sec.visual && sec.visual.type === "animation_scene") {
-                        // Render multiple frames if present
+                    } else if (sec.visual && sec.visual.type === "animation_scene") {
                         const framesHtml = sec.visual.frames.map(frame => `
                             <div class="frame-container">
                                 <div class="frame-label">${frame.label}</div>
@@ -276,11 +348,8 @@ export class MentorView {
                                 <div style="font-size: 0.8rem; color: #4a5568; margin-top: 5px;">${frame.caption}</div>
                             </div>
                          `).join("");
-
                         visualHtml = `<div class="visual-box">${framesHtml}</div>`;
-                    }
-                    else if (sec.visual && sec.visual.type === "emoji_scene") {
-                        // Fallback for purely static text visuals (if any remain)
+                    } else if (sec.visual && sec.visual.type === "emoji_scene") {
                         visualHtml = `
                             <div style="background: #ebf8ff; border-radius: 8px; padding: 20px; text-align: center; margin-bottom: 0px; border: 1px dashed #4299e1;">
                                 <div style="font-size: 2.5rem; letter-spacing: 5px; margin-bottom: 10px; animation: float 3s ease-in-out infinite;">${sec.visual.content}</div>
@@ -288,7 +357,6 @@ export class MentorView {
                             </div>
                         `;
                     }
-
                     block.innerHTML = `
                         <div style="font-size: 0.85rem; font-weight: 700; text-transform: uppercase; color: #3182ce; margin-bottom: 8px;">2. Visual Grounding</div>
                         ${visualHtml}
@@ -302,24 +370,17 @@ export class MentorView {
                              <div style="font-size: 1.05rem; color: #22543d;">${this.formatText(sec.content)}</div>
                         </div>
                     `;
-
-                    // Check for Integrated Visuals (Added per user request)
                     if (sec.visual) {
                         const visualDiv = document.createElement("div");
                         visualDiv.style.marginTop = "20px";
-
-                        let visualHtml = "";
                         if (sec.visual.type === "svg_scene") {
-                            visualHtml = `
+                            visualDiv.innerHTML = `
                                 <div style="background: white; border-radius: 12px; padding: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); border: 1px solid #e2e8f0; margin-bottom: 0px;">
                                     ${sec.visual.content}
                                     <div style="font-size: 0.85rem; color: #4a5568; font-style: italic; text-align: center; margin-top: 10px;">${sec.visual.caption}</div>
                                 </div>
                             `;
                         }
-
-                        visualDiv.innerHTML = visualHtml;
-                        // Append to the block, which contains the text explanation
                         block.appendChild(visualDiv);
                     }
                     break;
@@ -334,7 +395,6 @@ export class MentorView {
                     break;
 
                 case "consolidation":
-                    // Expecting content to be an array of strings or a bulleted string
                     const points = Array.isArray(sec.content) ? sec.content : [sec.content];
                     const listHtml = points.map(p => `<li style="margin-bottom: 8px;">${this.formatText(p)}</li>`).join("");
                     block.innerHTML = `
@@ -348,15 +408,20 @@ export class MentorView {
                     break;
 
                 case "questions":
-                    // Render multiple questions
                     block.innerHTML = `<div style="font-size: 0.85rem; font-weight: 700; text-transform: uppercase; color: #2d3748; margin-bottom: 12px;">6. Understanding Check</div>`;
                     sec.questions.forEach((q, idx) => {
-                        block.appendChild(this.createConceptCheck(q, idx));
+                        block.appendChild(this.createConceptCheck(q, idx, () => {
+                            completedInteractions++;
+                            checkCompletion();
+                        }));
                     });
                     break;
 
                 case "concept_check":
-                    block.appendChild(this.createConceptCheck(sec));
+                    block.appendChild(this.createConceptCheck(sec, 0, () => {
+                        completedInteractions++;
+                        checkCompletion();
+                    }));
                     break;
 
                 case "thought_experiment":
@@ -388,19 +453,27 @@ export class MentorView {
         nextWrapper.style.textAlign = "right";
         nextWrapper.style.marginTop = "40px";
 
-        if (this.currentModuleIndex < Chapter1.modules.length - 1) {
-            const nextBtn = document.createElement("button");
-            nextBtn.innerText = "NEXT MODULE →";
-            Object.assign(nextBtn.style, {
+        if (this.currentModuleIndex < this.currentChapter.modules.length - 1) {
+            this.nextBtn = document.createElement("button");
+            this.nextBtn.innerText = requiredInteractions > 0 ? "🔒 COMPLETE TASKS TO UNLOCK" : "NEXT MODULE →";
+            Object.assign(this.nextBtn.style, {
                 padding: "15px 30px", background: "#3182ce", color: "white", border: "none",
                 borderRadius: "8px", fontSize: "1rem", fontWeight: "bold", cursor: "pointer",
                 boxShadow: "0 4px 6px rgba(49, 130, 206, 0.3)"
             });
-            nextBtn.onclick = () => {
+
+            if (requiredInteractions > 0) {
+                this.nextBtn.disabled = true;
+                this.nextBtn.style.opacity = "0.5";
+                this.nextBtn.style.cursor = "not-allowed";
+            }
+
+            this.nextBtn.onclick = () => {
+                dbManager.completeModule(module.id);
                 this.currentModuleIndex++;
                 this.render();
             };
-            nextWrapper.appendChild(nextBtn);
+            nextWrapper.appendChild(this.nextBtn);
         } else {
             const finishBtn = document.createElement("button");
             finishBtn.innerText = "CHAPTER COMPLETE";
@@ -408,6 +481,9 @@ export class MentorView {
                 padding: "15px 30px", background: "#48bb78", color: "white", border: "none",
                 borderRadius: "8px", fontSize: "1rem", fontWeight: "bold", cursor: "default"
             });
+            if (requiredInteractions === 0 || completedInteractions >= requiredInteractions) {
+                dbManager.completeModule(module.id);
+            }
             nextWrapper.appendChild(finishBtn);
         }
         main.appendChild(nextWrapper);
@@ -415,7 +491,7 @@ export class MentorView {
         this.container.appendChild(main);
     }
 
-    createConceptCheck(data, index) {
+    createConceptCheck(data, index, onCorrect) {
         const wrapper = document.createElement("div");
         Object.assign(wrapper.style, { background: "white", border: "1px solid #e2e8f0", borderRadius: "12px", padding: "24px", marginBottom: "20px" });
 
@@ -438,6 +514,9 @@ export class MentorView {
         Object.assign(feedback.style, {
             display: "none", marginTop: "20px", padding: "15px", borderRadius: "8px", fontSize: "0.95rem", lineHeight: "1.5"
         });
+
+        // Track if this question was already answered correctly to prevent double counting
+        let solved = false;
 
         data.options.forEach(opt => {
             const btn = document.createElement("button");
@@ -473,6 +552,11 @@ export class MentorView {
                     feedback.style.color = "#22543d";
                     feedback.style.border = "1px solid #c6f6d5";
                     feedback.innerHTML = `<strong style="display:block; margin-bottom:5px;">✅ Correct!</strong> ${opt.feedback}`;
+
+                    if (!solved && onCorrect) {
+                        solved = true;
+                        onCorrect();
+                    }
                 } else {
                     btn.style.borderColor = "#f56565";
                     btn.style.background = "#fff5f5";
@@ -491,7 +575,6 @@ export class MentorView {
                         border: "none", borderRadius: "4px", fontSize: "0.8rem", cursor: "pointer"
                     });
                     retryBtn.onclick = () => {
-                        // Reset
                         feedback.style.display = "none";
                         feedback.innerHTML = "";
                         Array.from(optionsArea.children).forEach(b => {
@@ -502,7 +585,6 @@ export class MentorView {
                             b.style.background = "#f7fafc";
                             b.style.color = "#4a5568";
                         });
-                        // Remove retry button? Content is rebuilt anyway or just hide feedback.
                     };
                     feedback.appendChild(retryBtn);
                 }

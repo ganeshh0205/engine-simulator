@@ -17,33 +17,60 @@ window.onerror = function (message, source, lineno, colno, error) {
   document.body.appendChild(errorBox);
 };
 
+import './style.css';
 import { SceneManager } from "./core/SceneManager.js";
 import { HomeScreen } from "./ui/HomeScreen.js";
-// import { TutorialManager } from "./core/TutorialManager.js"; // Disabled
+import { AuthScreen } from "./ui/AuthScreen.js";
+import { dbManager } from "./core/DatabaseManager.js";
 
 const app = document.getElementById("app");
 
 // ROUTING / STATE MANAGEMENT
+// ROUTING / STATE MANAGEMENT
 const startSimulation = () => {
   // Initialize SceneManager (Engine Sim)
-  const sceneManager = new SceneManager(app);
-
-  // Initialize Tutorial Module (Optional/Future)
-  // const tutorial = new TutorialManager(sceneManager);
-  // sceneManager.tutorial = tutorial; 
-
+  // We pass an onExit callback to SceneManager
+  const sceneManager = new SceneManager(app, () => {
+    // On Exit: Cleanup is handled by SceneManager.dispose() usually
+    // but here we just re-launch Home.
+    app.innerHTML = "";
+    launchHomeScreen();
+  });
   sceneManager.start();
 };
 
 import { MentorView } from "./ui/MentorView.js";
-const home = new HomeScreen((mode) => {
-  if (mode === "SIMULATE") {
-    startSimulation();
-  } else if (mode === "MENTOR") {
-    new MentorView((targetMode) => {
-      if (targetMode === "SIMULATE") startSimulation();
+
+const initApp = () => {
+  // Check if user is logged in
+  if (!dbManager.isLoggedIn()) {
+    const auth = new AuthScreen(app, () => {
+      // On Success
+      launchHomeScreen();
     });
+    auth.mount();
   } else {
-    console.log("Unknown mode:", mode);
+    launchHomeScreen();
   }
-});
+};
+
+const launchHomeScreen = () => {
+  // Clear App (Auth might have left stuff)
+  app.innerHTML = "";
+
+  new HomeScreen((mode) => {
+    if (mode === "SIMULATE") {
+      startSimulation();
+    } else if (mode === "MENTOR") {
+      new MentorView((targetMode) => {
+        if (targetMode === "SIMULATE") startSimulation();
+        else if (targetMode === "HOME") launchHomeScreen();
+      });
+    } else {
+      console.log("Unknown mode:", mode);
+      launchHomeScreen();
+    }
+  });
+};
+
+initApp();

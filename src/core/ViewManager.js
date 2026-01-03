@@ -318,7 +318,8 @@ export class ViewManager {
                 // At low temp, mostly Metal. At high temp, Metal is overwhelmed.
                 
                 // Cold Logic: 300K -> Blue, 800K -> Grey
-                float coldT = clamp((temp - 300.0) / 500.0, 0.0, 1.0);
+                // ADJUSTMENT: Keep it blue longer (up to 500K) to avoid "major change" at idle
+                float coldT = clamp((temp - 500.0) / 500.0, 0.0, 1.0);
                 vec3 baseColor = mix(cColdBlue, cGrey, coldT);
 
                 float glowStrength = t * t * t; // Cubic curve for emission

@@ -14,10 +14,11 @@ import { CombustionShader } from "../effects/FlameShader.js";
 import { Nacelle } from "../components/Nacelle.js";
 
 export class SceneManager {
-  constructor(container) {
+  constructor(container, onExit) {
     console.log("SceneManager: CONSTRUCTOR START");
     console.log("EngineFactory Import:", EngineFactory);
     this.container = container;
+    this.onExit = onExit; // Callback for exiting simulation
 
     // 0. Scene Setup (Must be first)
     this.scene = new THREE.Scene();
@@ -150,12 +151,35 @@ export class SceneManager {
       this.simState = state;
     });
 
-    this.controlPanel = new ControlPanel(this.physics, this);
+    // PASS onExit to ControlPanel
+    this.controlPanel = new ControlPanel(this.physics, this, () => {
+      // Handle Exit Logic
+      this.dispose();
+      if (this.onExit) this.onExit();
+    });
     this.interactionManager.setControlPanel(this.controlPanel);
 
     this.lastTime = performance.now();
-    window.addEventListener("resize", this.onWindowResize.bind(this));
-    window.addEventListener("keydown", this.onKeyDown.bind(this));
+    this.resizeHandler = this.onWindowResize.bind(this);
+    this.keyDownHandler = this.onKeyDown.bind(this);
+    window.addEventListener("resize", this.resizeHandler);
+    window.addEventListener("keydown", this.keyDownHandler);
+  }
+
+  dispose() {
+    this.isDisposed = true; // Stop Loop flag
+
+    // Stop Loop
+    if (this.rafId) cancelAnimationFrame(this.rafId);
+
+    // Cleanup DOM
+    this.renderer.domElement.remove();
+    this.controlPanel.dispose();
+    if (this.simControls && this.simControls.container) this.simControls.container.remove();
+
+    // Remove Listeners
+    window.removeEventListener("resize", this.resizeHandler);
+    window.removeEventListener("keydown", this.keyDownHandler);
   }
 
   // Removed createEngine / switchEngine / setupSwapping (Simplification)
@@ -195,7 +219,8 @@ export class SceneManager {
   }
 
   animate() {
-    requestAnimationFrame(this.animate.bind(this));
+    if (this.isDisposed) return;
+    this.rafId = requestAnimationFrame(this.animate.bind(this));
 
     const now = performance.now();
     const dt = (now - this.lastTime) / 1000;
