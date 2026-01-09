@@ -7,7 +7,8 @@ export const Chapter2 = {
             sections: [
                 {
                     type: "lab_scene",
-                    narrative: [] // No narrative needed for now, just the scene
+                    scenario: "intro_particle",
+                    narrative: []
                 }
             ]
         },

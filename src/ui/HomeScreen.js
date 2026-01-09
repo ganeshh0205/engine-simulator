@@ -1,40 +1,46 @@
 import { dbManager } from "../core/DatabaseManager.js";
+
 export class HomeScreen {
     constructor(onStart) {
         this.onStart = onStart;
+        this.isMobile = window.innerWidth <= 768; // Simple check for init level
+
         this.container = document.createElement("div");
         this.container.className = "anim-fade-in";
         Object.assign(this.container.style, {
             position: "absolute", top: "0", left: "0", width: "100%", height: "100%",
-            background: "radial-gradient(circle at center, #1a202c 0%, #000000 100%)",
-            display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+            background: "radial-gradient(circle at center, #111 0%, #000 100%)", /* Premium Dark */
+            display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-start",
             zIndex: "2000", fontFamily: "'Inter', sans-serif", color: "#ffffff",
-            overflow: "hidden"
+            overflowX: "hidden", overflowY: "auto"
         });
 
-        // Background Animation Element (Subtle pulse)
+        // Background Animation Element (Subtle Cinematic Fog)
         const bgPulse = document.createElement("div");
         Object.assign(bgPulse.style, {
-            position: "absolute", width: "200vw", height: "200vh",
-            background: "radial-gradient(circle, rgba(66, 153, 225, 0.1) 0%, transparent 70%)",
-            animation: "pulse 10s infinite alternate",
-            pointerEvents: "none"
+            position: "absolute", width: "200vw", height: "200vh", top: "-50vh", left: "-50vw",
+            background: "radial-gradient(circle, rgba(0, 240, 255, 0.05) 0%, transparent 60%)",
+            animation: "pulse 15s infinite alternate",
+            pointerEvents: "none", zIndex: "0"
         });
         this.container.appendChild(bgPulse);
 
-        // Add Keyframes for pulse if not exists
+        // Add Keyframes
         if (!document.getElementById("home-keyframes")) {
             const style = document.createElement("style");
             style.id = "home-keyframes";
             style.innerHTML = `
                 @keyframes pulse {
-                    0% { transform: scale(1); opacity: 0.5; }
-                    100% { transform: scale(1.1); opacity: 0.8; }
+                    0% { transform: scale(1); opacity: 0.3; }
+                    100% { transform: scale(1.1); opacity: 0.6; }
                 }
-                @keyframes float {
-                    0% { transform: translateY(0px); }
-                    50% { transform: translateY(-10px); }
-                    100% { transform: translateY(0px); }
+                .hover-card:hover {
+                    transform: translateY(-5px);
+                    box-shadow: 0 20px 40px rgba(0,0,0,0.6);
+                    border-color: rgba(255,255,255,0.3) !important;
+                }
+                .hover-card:active {
+                    transform: scale(0.98);
                 }
             `;
             document.head.appendChild(style);
@@ -44,50 +50,96 @@ export class HomeScreen {
         document.body.appendChild(this.container);
     }
 
-
-
     buildUI() {
         // --- Header (User Profile) ---
         const user = dbManager.getCurrentUser();
         if (user) {
             const header = document.createElement("div");
             Object.assign(header.style, {
-                position: "absolute", top: "0", left: "0", width: "100%", padding: "30px 50px",
+                width: "100%",
+                // Fix: Add Safe Area Padding + Base Padding
+                padding: this.isMobile ? "max(40px, env(safe-area-inset-top)) 20px 20px 20px" : "40px 50px 20px 50px",
                 display: "flex", justifyContent: "space-between", alignItems: "center", boxSizing: "border-box",
-                zIndex: "50"
+                zIndex: "50", position: "relative",
+                // Glassmorphism for Header
+                background: "linear-gradient(to bottom, rgba(0,0,0,0.8), rgba(0,0,0,0))",
+                backdropFilter: "blur(5px)"
             });
 
             const welcome = document.createElement("div");
-            welcome.innerHTML = `<div style="font-size:0.9rem; color:var(--text-muted); margin-bottom:4px;">STATUS: ONLINE</div><div style="font-size:1.4rem; color:white; font-family:var(--font-display);">WELCOME, <span style="color:var(--accent-primary);">${user.name || user.username}</span></div>`;
+            welcome.innerHTML = `
+                <div style="font-size:0.7rem; color:#94a3b8; letter-spacing:2px; margin-bottom:6px; font-weight:700; text-transform:uppercase;">
+                    <span style="color:#10b981; margin-right:6px;">●</span> ONLINE
+                </div>
+                <div style="font-size:${this.isMobile ? '1.25rem' : '1.5rem'}; color:white; font-family:var(--font-display); font-weight:700;">
+                    HELLO, <span style="background:linear-gradient(135deg, #fff 0%, #cbd5e1 100%); -webkit-background-clip:text; -webkit-text-fill-color:transparent;">${user.name || user.username}</span>
+                </div>
+            `;
 
             header.appendChild(welcome);
-            // Removed redundant Profile Button (Use Dashboard Card)
+
+            // Premium "Logout" Button
+            const logoutBtn = document.createElement("button");
+            logoutBtn.innerHTML = `
+                <span style="opacity:0.8">LOGOUT</span>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="margin-left:6px;"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
+            `;
+            Object.assign(logoutBtn.style, {
+                background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)",
+                color: "#e2e8f0", padding: "8px 14px", borderRadius: "30px", cursor: "pointer",
+                fontSize: "0.7rem", letterSpacing: "1px", fontWeight: "700",
+                display: "flex", alignItems: "center", transition: "all 0.2s ease"
+            });
+            logoutBtn.onmouseover = () => {
+                logoutBtn.style.background = "rgba(255,255,255,0.15)";
+                logoutBtn.style.borderColor = "rgba(255,255,255,0.3)";
+            };
+            logoutBtn.onmouseout = () => {
+                logoutBtn.style.background = "rgba(255,255,255,0.05)";
+                logoutBtn.style.borderColor = "rgba(255,255,255,0.1)";
+            };
+            logoutBtn.onclick = () => dbManager.logout();
+
+            header.appendChild(logoutBtn);
             this.container.appendChild(header);
         }
 
         // Main Content Wrapper
         const content = document.createElement("div");
         Object.assign(content.style, {
-            display: "flex", flexDirection: "column", alignItems: "flex-start",
-            padding: "0", width: "80%", maxWidth: "1200px", zIndex: "10"
+            display: "flex", flexDirection: "column",
+            alignItems: this.isMobile ? "center" : "flex-start",
+            padding: this.isMobile ? "0 20px 80px 20px" : "0",
+            width: this.isMobile ? "100%" : "80%",
+            maxWidth: "1200px", zIndex: "10",
+            boxSizing: "border-box",
+            flex: "1", justifyContent: "center" // Center vertically on desktop
         });
 
         // Title Area
         const titleArea = document.createElement("div");
-        titleArea.style.marginBottom = "60px";
+        titleArea.style.marginBottom = this.isMobile ? "40px" : "60px";
+        if (this.isMobile) titleArea.style.textAlign = "center";
 
         const title = document.createElement("h1");
-        title.innerHTML = "PROPULSE<span style='color: #4299e1'>AI</span> <span style='font-size:1.5rem; color:#4a5568; font-weight:300;'>ENGINEERING SUITE</span>";
+        // Responsive Font Size logic
+        title.innerHTML = "PROPULSE<span style='color: var(--accent-primary)'>AI</span>";
         Object.assign(title.style, {
-            fontSize: "4.5rem", fontWeight: "900", letterSpacing: "-2px", margin: "0 0 1rem 0",
-            background: "linear-gradient(to right, #ffffff, #a0aec0)",
+            fontSize: this.isMobile ? "2.5rem" : "4.5rem",
+            fontWeight: "900", letterSpacing: "-2px", margin: "0 0 0.5rem 0",
+            fontFamily: "var(--font-display)",
+            background: "linear-gradient(to right, #ffffff, #94a3b8)",
             "-webkit-background-clip": "text", "-webkit-text-fill-color": "transparent"
         });
 
         const subtitle = document.createElement("p");
-        subtitle.innerText = "Select a module to begin your simulation session.";
+        subtitle.innerText = "Advanced Engineering Simulation Suite";
         Object.assign(subtitle.style, {
-            fontSize: "1.2rem", color: "#a0aec0", fontWeight: "400", maxWidth: "600px", lineHeight: "1.6"
+            fontSize: this.isMobile ? "1rem" : "1.2rem",
+            color: "var(--text-muted)", fontWeight: "400",
+            maxWidth: "600px", lineHeight: "1.6",
+            borderLeft: this.isMobile ? "none" : "3px solid var(--accent-secondary)", // Premium accent
+            paddingLeft: this.isMobile ? "0" : "15px"
         });
 
         titleArea.appendChild(title);
@@ -97,34 +149,39 @@ export class HomeScreen {
         // Grid Container
         const grid = document.createElement("div");
         Object.assign(grid.style, {
-            display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: "30px",
+            display: "grid",
+            gridTemplateColumns: this.isMobile ? "1fr" : "repeat(auto-fit, minmax(300px, 1fr))",
+            gap: "20px",
             width: "100%"
         });
 
         // 1. AI MENTORSHIP
         grid.appendChild(this.createCard({
             title: "ACADEMY",
-            subtitle: "Interactive propulsion curriculum.",
-            icon: `<svg width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="#667eea" stroke-width="1.5"><path d="M22 10v6M2 10l10-5 10 5-10 5z"></path><path d="M6 12v5c3 3 9 3 12 0v-5"></path></svg>`,
-            color: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+            subtitle: "Interactive Curriculum",
+            icon: `<svg width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M22 10v6M2 10l10-5 10 5-10 5z"></path><path d="M6 12v5c3 3 9 3 12 0v-5"></path></svg>`,
+            gradient: "linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%)",
+            border: "#667eea",
             onClick: () => { this.hide(); this.onStart("MENTOR"); }
         }));
 
         // 2. SIMULATION LABORATORY
         grid.appendChild(this.createCard({
             title: "SIMULATION LAB",
-            subtitle: "Physics-accurate sandbox environment.",
-            icon: `<svg width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="#fda085" stroke-width="1.5"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"></path></svg>`,
-            color: "linear-gradient(135deg, #f6d365 0%, #fda085 100%)",
+            subtitle: "Physics Sandbox",
+            icon: `<svg width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"></path></svg>`,
+            gradient: "linear-gradient(135deg, rgba(246, 211, 101, 0.1) 0%, rgba(253, 160, 133, 0.1) 100%)",
+            border: "#fda085",
             onClick: () => { this.hide(); this.onStart("SIMULATE"); }
         }));
 
         // 3. USER PROFILE
         grid.appendChild(this.createCard({
-            title: "USER PROFILE",
-            subtitle: "Track progress & settings.",
-            icon: `<svg width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="#a3bffa" stroke-width="1.5"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>`,
-            color: "linear-gradient(135deg, #e0c3fc 0%, #8ec5fc 100%)",
+            title: "PROFILE",
+            subtitle: "Progress & Settings",
+            icon: `<svg width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>`,
+            gradient: "linear-gradient(135deg, rgba(224, 195, 252, 0.1) 0%, rgba(142, 197, 252, 0.1) 100%)",
+            border: "#a3bffa",
             onClick: () => {
                 import("./ProfileView.js").then(({ ProfileView }) => {
                     new ProfileView(() => { });
@@ -137,145 +194,80 @@ export class HomeScreen {
 
         // Footer
         const footer = document.createElement("div");
-        footer.innerHTML = "SYSTEM READY • v1.0.0 Alpha • <span style='opacity:0.5'>High Performance Mode Active</span>";
+        footer.innerHTML = "SYSTEM READY • v2.0 MOBILE • <span style='opacity:0.5'>PREMIUM</span>";
         Object.assign(footer.style, {
-            position: "absolute", bottom: "30px", width: "100%", textAlign: "center",
-            color: "rgba(255,255,255,0.2)", fontSize: "0.8rem", fontFamily: "monospace", letterSpacing: "2px"
+            padding: "20px", width: "100%", textAlign: "center",
+            color: "rgba(255,255,255,0.2)", fontSize: "0.7rem", fontFamily: "monospace", letterSpacing: "2px",
+            boxSizing: "border-box"
         });
         this.container.appendChild(footer);
     }
 
-    createCard({ title, subtitle, icon, color, onClick }) {
+    createCard({ title, subtitle, icon, gradient, border, onClick }) {
         const card = document.createElement("div");
+        card.className = "glass-panel hover-card"; // Use Global + Local Animation Class
         Object.assign(card.style, {
-            background: "rgba(255,255,255,0.03)",
-            backdropFilter: "blur(20px)",
-            border: "1px solid rgba(255,255,255,0.05)",
-            borderRadius: "20px",
-            padding: "40px",
+            background: gradient,
+            border: `1px solid rgba(255,255,255,0.05)`, // Base border
+            // Accent border on left
+            borderLeft: `4px solid ${border}`,
+            borderRadius: "16px",
+            padding: "25px",
             cursor: "pointer",
-            transition: "all 0.3s ease",
+            transition: "all 0.4s cubic-bezier(0.2, 0.8, 0.2, 1)",
             position: "relative",
             overflow: "hidden",
-            display: "flex", flexDirection: "column", justifyContent: "space-between",
-            height: "240px"
+            display: "flex", flexDirection: "row", // Horizontal layout for cards looks nice and premium
+            alignItems: "center", justifyContent: "space-between",
+            height: this.isMobile ? "100px" : "200px",
+            boxShadow: "0 10px 30px rgba(0,0,0,0.2)"
         });
 
-        // Hover Effect
-        card.onmouseenter = () => {
-            card.style.transform = "translateY(-10px)";
-            card.style.background = "rgba(255,255,255,0.08)";
-            card.style.borderColor = "rgba(255,255,255,0.2)";
-            card.style.boxShadow = "0 20px 40px rgba(0,0,0,0.4)";
-            iconEl.style.transform = "scale(1.2) rotate(5deg)";
-        };
-        card.onmouseleave = () => {
-            card.style.transform = "translateY(0)";
-            card.style.background = "rgba(255,255,255,0.03)";
-            card.style.borderColor = "rgba(255,255,255,0.05)";
-            card.style.boxShadow = "none";
-            iconEl.style.transform = "scale(1) rotate(0deg)";
-        };
-        card.onclick = onClick;
+        if (!this.isMobile) {
+            card.style.flexDirection = "column";
+            card.style.alignItems = "flex-start";
+            card.style.justifyContent = "space-between";
+        }
+
+        card.addEventListener('click', onClick);
 
         // Content
-        const top = document.createElement("div");
+        const textGroup = document.createElement("div");
+
         const h2 = document.createElement("h2");
         h2.innerText = title;
-        Object.assign(h2.style, { fontSize: "1.5rem", fontWeight: "700", marginBottom: "10px", color: "white" });
+        Object.assign(h2.style, {
+            fontSize: this.isMobile ? "1.2rem" : "1.5rem",
+            fontWeight: "700", margin: "0 0 5px 0", color: "white",
+            fontFamily: "var(--font-display)", letterSpacing: "1px"
+        });
 
         const p = document.createElement("p");
         p.innerText = subtitle;
-        Object.assign(p.style, { fontSize: "1rem", color: "#a0aec0", lineHeight: "1.5" });
+        Object.assign(p.style, { fontSize: "0.9rem", color: "var(--text-muted)", margin: "0" });
 
-        top.appendChild(h2);
-        top.appendChild(p);
+        textGroup.appendChild(h2);
+        textGroup.appendChild(p);
 
         // Icon/Graphic
         const iconEl = document.createElement("div");
-        iconEl.innerHTML = icon; // Use innerHTML for SVG
+        iconEl.innerHTML = icon;
         Object.assign(iconEl.style, {
-            position: "absolute", bottom: "20px", right: "30px", opacity: "0.8",
-            transition: "all 0.5s ease"
+            color: border,
+            opacity: "0.8",
+            transform: this.isMobile ? "scale(0.8)" : "scale(1)",
+            transition: "transform 0.5s ease"
         });
 
-        // Accent Line
-        const accent = document.createElement("div");
-        Object.assign(accent.style, {
-            position: "absolute", top: "0", left: "0", width: "100%", height: "4px", background: color
-        });
-
-        card.appendChild(accent);
-        card.appendChild(top);
+        card.appendChild(textGroup);
         card.appendChild(iconEl);
 
         return card;
     }
 
-    createButton(label, subtext, gradient, onClick) {
-        const btn = document.createElement("button");
-        Object.assign(btn.style, {
-            padding: "0", // Reset for inner content
-            border: "none",
-            background: "transparent",
-            cursor: "pointer",
-            outline: "none",
-            perspective: "1000px" // For 3D tilt effect if we wanted, but keeping simple for now
-        });
-
-        const inner = document.createElement("div");
-        Object.assign(inner.style, {
-            display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-            width: "220px", height: "140px",
-            background: "rgba(255,255,255,0.05)",
-            borderRadius: "16px",
-            border: "1px solid rgba(255,255,255,0.1)",
-            transition: "all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)"
-        });
-
-        // Hover Effects applied to 'inner' via JS events on 'btn'
-        btn.onmouseover = () => {
-            inner.style.transform = "translateY(-8px) scale(1.02)";
-            inner.style.background = gradient;
-            inner.style.borderColor = "transparent";
-            inner.style.boxShadow = "0 20px 30px rgba(0,0,0,0.3)";
-            titleText.style.color = "#fff"; // Ensure text is white on gradient
-            subText.style.color = "rgba(255,255,255,0.9)";
-        };
-        btn.onmouseout = () => {
-            inner.style.transform = "translateY(0) scale(1)";
-            inner.style.background = "rgba(255,255,255,0.05)";
-            inner.style.borderColor = "rgba(255,255,255,0.1)";
-            inner.style.boxShadow = "none";
-            titleText.style.color = "#fff";
-            subText.style.color = "#a0aec0";
-        };
-        btn.onclick = onClick;
-
-        const titleText = document.createElement("span");
-        titleText.innerText = label;
-        Object.assign(titleText.style, {
-            fontSize: "1.5rem", fontWeight: "700", color: "#fff", marginBottom: "0.25rem",
-            transition: "color 0.3s"
-        });
-
-        const subText = document.createElement("span");
-        subText.innerText = subtext;
-        Object.assign(subText.style, {
-            fontSize: "0.9rem", color: "#a0aec0", fontWeight: "400",
-            transition: "color 0.3s"
-        });
-
-        inner.appendChild(titleText);
-        inner.appendChild(subText);
-        btn.appendChild(inner);
-
-        return btn;
-    }
-
     hide() {
-        this.container.style.transition = "opacity 0.8s ease";
+        this.container.style.transition = "opacity 0.6s ease";
         this.container.style.opacity = "0";
-        setTimeout(() => this.container.remove(), 800);
+        setTimeout(() => this.container.remove(), 600);
     }
 }

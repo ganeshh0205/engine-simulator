@@ -42,6 +42,15 @@ const startSimulation = () => {
 import { MentorView } from "./ui/MentorView.js";
 
 const initApp = () => {
+  // Hide Splash Screen
+  const splash = document.getElementById("splash-screen");
+  if (splash) {
+    setTimeout(() => {
+      splash.style.opacity = "0";
+      setTimeout(() => splash.remove(), 800);
+    }, 1000); // Simulate brief load for branding
+  }
+
   // Check if user is logged in
   if (!dbManager.isLoggedIn()) {
     const auth = new AuthScreen(app, () => {

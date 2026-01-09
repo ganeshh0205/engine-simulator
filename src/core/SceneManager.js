@@ -78,7 +78,8 @@ export class SceneManager {
     this.camera.position.set(10, 5, 15);
 
     // 4. Renderer
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+    // 4. Renderer
+    this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance", alpha: true });
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -106,6 +107,7 @@ export class SceneManager {
 
     // 8. ENGINE CREATION (Direct)
     console.log("Creating Standard Turbojet...");
+    // Updated Combustor Geometry: Quaternion Pipe Alignment
     this.engine = EngineFactory.createTurbojet();
 
     // Add Nacelle (Outer Casing)
@@ -275,8 +277,8 @@ export class SceneManager {
     const getHeatColor = (temp, outputColor) => {
       const color = outputColor || new THREE.Color(0x000000);
 
-      // Below 500C (773K) metals don't glow much in visible spectrum
-      if (temp < 773) {
+      // Below 500K (was 773/500C) we start showing faint heat
+      if (temp < 500) {
         color.setRGB(0, 0, 0);
         return color;
       }
@@ -422,6 +424,19 @@ export class SceneManager {
   getComponentByName(name) {
     if (!this.engine) return null;
     return this.engine.getObjectByName(name);
+  }
+
+  /* =======================
+     AR Support
+  ======================= */
+  setAR(enabled) {
+    if (enabled) {
+      this.scene.background = null; // Transparent
+      this.renderer.setClearColor(0x000000, 0); // Alpha 0
+    } else {
+      this.scene.background = new THREE.Color(0x050505);
+      this.renderer.setClearColor(0x000000, 1); // Alpha 1
+    }
   }
 
   /* =======================

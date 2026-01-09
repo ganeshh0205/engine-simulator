@@ -29,75 +29,120 @@ export class ProfileView {
             return;
         }
 
+        this.isMobile = window.innerWidth <= 768;
+
         const panel = document.createElement("div");
         panel.className = "glass-panel";
-        Object.assign(panel.style, {
-            width: "800px", height: "600px", display: "grid", gridTemplateColumns: "300px 1fr",
-            overflow: "hidden", border: "1px solid rgba(0, 240, 255, 0.2)"
-        });
+
+        if (this.isMobile) {
+            // MOBILE LAYOUT: Full Screen, Vertical Stack
+            Object.assign(panel.style, {
+                width: "100%", height: "100%",
+                display: "flex", flexDirection: "column",
+                border: "none", borderRadius: "0"
+            });
+        } else {
+            // DESKTOP LAYOUT: Centered Modal
+            Object.assign(panel.style, {
+                width: "800px", height: "600px", display: "grid", gridTemplateColumns: "300px 1fr",
+                overflow: "hidden", border: "1px solid rgba(0, 240, 255, 0.2)", borderRadius: "12px"
+            });
+        }
 
         // --- Left Sidebar (Identity) ---
         const sidebar = document.createElement("div");
         Object.assign(sidebar.style, {
-            background: "rgba(0,0,0,0.3)", padding: "40px 20px",
-            display: "flex", flexDirection: "column", alignItems: "center", borderRight: "1px solid rgba(255,255,255,0.1)"
+            background: "rgba(0,0,0,0.3)",
+            padding: this.isMobile ? "max(40px, env(safe-area-inset-top)) 20px 20px 20px" : "40px 20px",
+            display: "flex",
+            flexDirection: this.isMobile ? "row" : "column",
+            alignItems: "center",
+            borderRight: this.isMobile ? "none" : "1px solid rgba(255,255,255,0.1)",
+            borderBottom: this.isMobile ? "1px solid rgba(255,255,255,0.1)" : "none",
+            gap: this.isMobile ? "20px" : "0" // Gap for horizontal layout
         });
 
         // Avatar
         const avatar = document.createElement("div");
         avatar.innerText = this.user.name ? this.user.name[0].toUpperCase() : "P";
         Object.assign(avatar.style, {
-            width: "100px", height: "100px", borderRadius: "50%",
+            width: this.isMobile ? "60px" : "100px",
+            height: this.isMobile ? "60px" : "100px",
+            borderRadius: "50%",
             background: "linear-gradient(135deg, var(--accent-primary), var(--accent-secondary))",
             display: "flex", justifyContent: "center", alignItems: "center",
-            fontSize: "3rem", fontWeight: "bold", boxShadow: "0 0 20px rgba(0, 240, 255, 0.5)",
-            marginBottom: "20px"
+            fontSize: this.isMobile ? "1.5rem" : "3rem",
+            fontWeight: "bold", boxShadow: "0 0 20px rgba(0, 240, 255, 0.5)",
+            marginBottom: this.isMobile ? "0" : "20px",
+            flexShrink: "0"
         });
         sidebar.appendChild(avatar);
+
+        // Name Container (for mobile flex)
+        const nameContainer = document.createElement("div");
+        if (this.isMobile) {
+            Object.assign(nameContainer.style, { flex: "1" });
+        } else {
+            Object.assign(nameContainer.style, { width: "100%", textAlign: "center" });
+        }
 
         // Name
         const name = document.createElement("h2");
         name.innerText = this.user.name || "Unknown Pilot";
         name.style.margin = "0 0 5px 0";
-        sidebar.appendChild(name);
+        name.style.fontSize = this.isMobile ? "1.2rem" : "1.5rem"; // Smaller on mobile
+        nameContainer.appendChild(name);
 
         const callsign = document.createElement("div");
         callsign.innerHTML = `<span style="color:var(--text-muted)">Callsign:</span> @${this.user.username}`;
         callsign.style.fontSize = "0.9rem";
-        sidebar.appendChild(callsign);
+        nameContainer.appendChild(callsign);
 
         const email = document.createElement("div");
         email.innerText = this.user.email || "No Email";
         email.style.fontSize = "0.8rem";
         email.style.color = "var(--text-muted)";
         email.style.marginTop = "5px";
-        sidebar.appendChild(email);
+        nameContainer.appendChild(email);
+
+        sidebar.appendChild(nameContainer);
 
         const joined = document.createElement("div");
         const date = new Date(this.user.joinedAt).toLocaleDateString();
         joined.innerText = `Joined: ${date}`;
         joined.style.cssText = "margin-top: auto; font-size: 0.75rem; color: rgba(255,255,255,0.3)";
+        if (this.isMobile) joined.style.display = "none"; // Hide on mobile header
         sidebar.appendChild(joined);
 
         // Actions
+        // On mobile, maybe hide Logout to save space? Or make it small? 
+        // Let's keep it but make it compact.
         const btnLogout = document.createElement("button");
-        btnLogout.innerText = "LOGOUT";
+        btnLogout.innerText = this.isMobile ? "EXIT" : "LOGOUT";
         btnLogout.className = "btn-secondary";
-        btnLogout.style.width = "100%";
-        btnLogout.style.marginTop = "10px";
+
+        if (this.isMobile) {
+            Object.assign(btnLogout.style, {
+                width: "auto", padding: "8px 12px", fontSize: "0.8rem",
+                marginTop: "0", marginLeft: "10px"
+            });
+        } else {
+            Object.assign(btnLogout.style, {
+                width: "100%", marginTop: "10px"
+            });
+        }
+
         btnLogout.style.borderColor = "var(--danger)";
         btnLogout.style.color = "var(--danger)";
-        btnLogout.onmouseover = () => { btnLogout.style.background = "rgba(239, 68, 68, 0.1)"; };
-        btnLogout.onmouseout = () => { btnLogout.style.background = "transparent"; };
-        btnLogout.onclick = () => {
-            dbManager.logout();
-        };
+        btnLogout.onclick = () => { dbManager.logout(); };
         sidebar.appendChild(btnLogout);
 
         // --- Right Content (Progress) ---
         const content = document.createElement("div");
         Object.assign(content.style, {
-            padding: "40px", overflowY: "auto"
+            padding: this.isMobile ? "20px" : "40px",
+            overflowY: "auto",
+            flex: "1" // Take remaining height
         });
 
         const header = document.createElement("div");
@@ -141,6 +186,36 @@ export class ProfileView {
             </div>
         `;
         content.appendChild(statsBox);
+
+        // --- SKILL ASSESSMENT (KNOWLEDGE TRACING) ---
+        const skills = this.user.skills || { thermal: 50, efficiency: 50, safety: 50 }; // Default
+
+        const skillBox = document.createElement("div");
+        skillBox.innerHTML = `<div style="font-size: 0.8rem; font-weight: bold; color: var(--accent-secondary); margin-bottom: 15px; letter-spacing: 1px;">PILOT PROFICIENCY (AI ASSESSMENT)</div>`;
+
+        const createBar = (label, val, color) => {
+            return `
+                <div style="margin-bottom: 12px;">
+                    <div style="display:flex; justify-content:space-between; margin-bottom:4px; font-size:0.8rem; color:#cbd5e0;">
+                        <span>${label}</span>
+                        <span>${Math.round(val)}%</span>
+                    </div>
+                    <div style="width:100%; height:6px; background:rgba(255,255,255,0.1); border-radius:3px; overflow:hidden;">
+                        <div style="width:${val}%; height:100%; background:${color}; border-radius:3px; transition:width 1s ease;"></div>
+                    </div>
+                </div>
+            `;
+        };
+
+        skillBox.innerHTML += createBar("Thermal Management", skills.thermal, "#f56565"); // Red
+        skillBox.innerHTML += createBar("Fuel Efficiency", skills.efficiency, "#4299e1"); // Blue
+        skillBox.innerHTML += createBar("Safety Compliance", skills.safety, "#48bb78"); // Green
+
+        skillBox.style.marginBottom = "30px";
+        skillBox.style.padding = "20px";
+        skillBox.style.background = "rgba(255,255,255,0.03)";
+        skillBox.style.borderRadius = "8px";
+        content.appendChild(skillBox);
 
         // Detailed List (The "Sheet")
         const table = document.createElement("div");

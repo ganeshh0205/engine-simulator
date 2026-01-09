@@ -1,4 +1,6 @@
 
+import { dataLogger } from "./DataLogger";
+
 export class PhysicsEngine {
     constructor() {
         // Inputs
@@ -143,11 +145,27 @@ export class PhysicsEngine {
         // Or Fuel Control Unit handles it. Kept simple for now.
 
         // 4. Run Cycle Calculations
+        // 4. Run Cycle Calculations
         // Only valid if rotating
         if (this.state.rpm > 1.0) {
             this.calculateCycle();
         } else {
             this.resetCycle();
+        }
+
+        // 5. ANOMALY DETECTION (For AI Training)
+        const isSurge = this.state.p3 > (this.state.t4 * 100) && this.state.airflow < 5.0; // Simplified surge logic
+        const anomalies = {
+            stall: this.state.airflow < 10.0 && this.state.rpm > 60.0, // High RPM, Low Flow
+            surge: isSurge,
+            fire: this.state.egt > 950.0 // Overheat
+        };
+
+        // Record Data
+        try {
+            dataLogger.record(this.state, anomalies);
+        } catch (e) {
+            // silent fail
         }
     }
 

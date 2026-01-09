@@ -13,8 +13,13 @@ export class DatabaseManager {
 
     // --- Helpers ---
     _getUsers() {
-        const d = localStorage.getItem(this.STORAGE_KEY_USERS);
-        return d ? JSON.parse(d) : [];
+        try {
+            const d = localStorage.getItem(this.STORAGE_KEY_USERS);
+            return d ? JSON.parse(d) : [];
+        } catch (e) {
+            console.error("Data integrity error (users):", e);
+            return [];
+        }
     }
 
     _saveUsers(users) {
@@ -22,8 +27,14 @@ export class DatabaseManager {
     }
 
     _getProgressData() {
-        const d = localStorage.getItem(this.STORAGE_KEY_PROGRESS);
-        return d ? JSON.parse(d) : {};
+        try {
+            const d = localStorage.getItem(this.STORAGE_KEY_PROGRESS);
+            return d ? JSON.parse(d) : {};
+        } catch (e) {
+            console.error("Data integrity error (progress):", e);
+            // Backup/Reset if corrupted? For now return empty.
+            return {};
+        }
     }
 
     _saveProgressData(data) {
@@ -41,10 +52,14 @@ export class DatabaseManager {
         // data: { username, password, email, name }
         const users = this._getUsers();
 
-        if (users.find(u => u.username === data.username)) {
+        // Normalize inputs for comparison
+        const normUser = data.username.toLowerCase().trim();
+        const normEmail = data.email.toLowerCase().trim();
+
+        if (users.find(u => u.username.toLowerCase() === normUser)) {
             return { success: false, message: "Username already taken." };
         }
-        if (users.find(u => u.email === data.email)) {
+        if (users.find(u => u.email.toLowerCase() === normEmail)) {
             return { success: false, message: "Email already registered." };
         }
 
@@ -85,17 +100,23 @@ export class DatabaseManager {
     logout() {
         this.currentUser = null;
         localStorage.removeItem(this.STORAGE_KEY_SESSION);
+        // Force reload to clear all in-memory application state (Modules, Scenes, Physics)
         window.location.reload();
     }
 
     restoreSession() {
-        const session = localStorage.getItem(this.STORAGE_KEY_SESSION);
-        if (session) {
-            this.currentUser = JSON.parse(session);
-            // Ensure progress exists
-            if (this.currentUser && this.currentUser.id) {
-                this._ensureUserProgress(this.currentUser.id);
+        try {
+            const session = localStorage.getItem(this.STORAGE_KEY_SESSION);
+            if (session) {
+                this.currentUser = JSON.parse(session);
+                // Ensure progress exists
+                if (this.currentUser && this.currentUser.id) {
+                    this._ensureUserProgress(this.currentUser.id);
+                }
             }
+        } catch (e) {
+            console.warn("Session restore failed:", e);
+            localStorage.removeItem(this.STORAGE_KEY_SESSION);
         }
     }
 
@@ -105,6 +126,35 @@ export class DatabaseManager {
 
     getCurrentUser() {
         return this.currentUser;
+    }
+
+    // --- GAMIFICATION ---
+    getXP() {
+        return parseInt(localStorage.getItem("engine_sim_xp") || "0");
+    }
+
+    addXP(amount) {
+        // Visual Notification
+        const visual = document.createElement("div");
+        visual.innerText = `+${amount} XP`;
+        Object.assign(visual.style, {
+            position: "fixed", top: "20%", left: "50%", transform: "translateX(-50%)",
+            color: "#fbbf24", fontWeight: "bold", fontSize: "2rem", zIndex: "9999",
+            textShadow: "0 4px 10px rgba(0,0,0,0.5)", animation: "floatUp 1s ease-out forwards"
+        });
+        document.body.appendChild(visual);
+
+        if (!document.getElementById("xp-anim-style")) {
+            const style = document.createElement("style");
+            style.id = "xp-anim-style";
+            style.innerHTML = `@keyframes floatUp { 0% { opacity:1; transform:translate(-50%, 0); } 100% { opacity:0; transform:translate(-50%, -50px); } }`;
+            document.head.appendChild(style);
+        }
+        setTimeout(() => visual.remove(), 1000);
+
+        // Logic
+        const current = this.getXP();
+        localStorage.setItem("engine_sim_xp", (current + amount).toString());
     }
 
     // --- Progress ---

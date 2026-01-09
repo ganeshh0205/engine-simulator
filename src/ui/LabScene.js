@@ -57,8 +57,105 @@ export class LabScene {
         this.onMouseDownBound = this.onMouseDown.bind(this);
         this.onMouseUpBound = this.onMouseUp.bind(this);
 
+        // Inject Styles (Robust CSS)
+        this.injectStyles();
+
         // Delay init slightly to ensure container has size
         requestAnimationFrame(() => this.init());
+    }
+
+    injectStyles() {
+        if (document.getElementById('lab-scene-styles')) return;
+        const style = document.createElement('style');
+        style.id = 'lab-scene-styles';
+        style.innerHTML = `
+            .lab-text-widget {
+                position: absolute;
+                bottom: 30px;
+                left: 30px;
+                padding: 15px 25px;
+                background: rgba(255, 255, 255, 0.08);
+                backdrop-filter: blur(12px);
+                border: 1px solid rgba(255, 255, 255, 0.15);
+                border-radius: 16px;
+                color: #e2e8f0;
+                font-family: 'Inter', sans-serif;
+                font-size: 1rem;
+                line-height: 1.6;
+                box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+                max-width: min(500px, 90vw);
+                width: fit-content;
+                text-align: left;
+                transition: all 0.3s ease;
+                z-index: 100;
+            }
+            .lab-text-title {
+                font-size: 0.85rem;
+                text-transform: uppercase;
+                color: #718096;
+                letter-spacing: 2px;
+                margin-bottom: 8px;
+                font-weight: 700;
+            }
+            .lab-text-body {
+                font-weight: 400;
+                font-size: 1.15rem;
+                color: #ffffff;
+                margin-bottom: 20px;
+            }
+            .lab-continue-btn {
+                padding: 10px 25px;
+                background: #3182ce;
+                color: white;
+                border: none;
+                border-radius: 50px;
+                font-size: 0.9rem;
+                font-weight: 600;
+                cursor: pointer;
+                letter-spacing: 1px;
+                transition: transform 0.2s;
+            }
+            .lab-continue-btn:hover {
+                transform: scale(1.05);
+                background: #4299e1;
+            }
+
+            /* MOBILE / TABLET OVERRIDE (Bottom Sheet) */
+            @media (max-width: 900px) {
+                .lab-text-widget {
+                    bottom: 0 !important;
+                    left: 0 !important;
+                    right: 0 !important;
+                    width: 100% !important;
+                    max-width: none !important;
+                    border-radius: 20px 20px 0 0 !important;
+                    background: rgba(15, 23, 42, 0.95) !important; /* Darker, clearer background */
+                    border-top: 1px solid rgba(255, 255, 255, 0.2);
+                    border-bottom: none;
+                    border-left: none;
+                    border-right: none;
+                    padding: 15px 20px 30px 20px; /* Reduced vertical padding */
+                    backdrop-filter: blur(15px);
+                }
+                .lab-text-body {
+                    font-size: 0.95rem; /* Slightly smaller for compactness */
+                    line-height: 1.4;
+                    margin-bottom: 12px;
+                    color: #cbd5e1;
+                }
+                .lab-text-title {
+                    font-size: 0.75rem;
+                    margin-bottom: 5px;
+                }
+                .lab-continue-btn {
+                    padding: 8px 20px;
+                    font-size: 0.85rem;
+                    width: 100%; /* Full width button on mobile */
+                    margin-top: 5px;
+                }
+            }
+        `;
+        document.head.appendChild(style);
     }
 
     init() {
@@ -134,9 +231,10 @@ export class LabScene {
         const colors = new Float32Array(count * 3);
         const userData = []; // Store offsets/speeds per particle
         for (let i = 0; i < count; i++) {
-            pos[i * 3] = (Math.random() - 0.5) * 5;
-            pos[i * 3 + 1] = (Math.random() - 0.5) * 5;
-            pos[i * 3 + 2] = (Math.random() - 0.5) * 10 - 5;
+            // ALIGN TO ENGINE AXIS (X is Axial, Y/Z Radial)
+            pos[i * 3] = (Math.random() - 0.5) * 10 - 2; // X: Spread upstream (-7 to +3)
+            pos[i * 3 + 1] = (Math.random() - 0.5) * 3; // Y: Radial
+            pos[i * 3 + 2] = (Math.random() - 0.5) * 3; // Z: Radial
 
             // Init Color (Blueish)
             colors[i * 3] = 0.6; // R
@@ -166,7 +264,10 @@ export class LabScene {
         });
         this.flowParticles = new THREE.Points(geom, mat);
         this.flowParticles.userData = { config: userData };
-        this.scene.add(this.flowParticles);
+        // ATTACH TO ENGINE FOR LOCAL COORDINATES
+        if (this.engine) this.engine.add(this.flowParticles);
+        else this.scene.add(this.flowParticles);
+
         this.flowParticles.visible = false;
     }
 
@@ -224,23 +325,20 @@ export class LabScene {
         const rect = this.renderer.domElement.getBoundingClientRect();
         this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
         this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+        // DEBUG: Output Camera Position for User
+        const cPos = this.camera.position;
+        const cTgt = this.controls.target;
+        const msg = `CAM: set(${cPos.x.toFixed(2)}, ${cPos.y.toFixed(2)}, ${cPos.z.toFixed(2)}) | TGT: set(${cTgt.x.toFixed(2)}, ${cTgt.y.toFixed(2)}, ${cTgt.z.toFixed(2)})`;
+        console.log(msg);
+        // alert(msg); // Uncomment if user wants popup
+
         this.raycaster.setFromCamera(this.mouse, this.camera);
         const intersects = this.raycaster.intersectObjects(this.scene.children, true);
 
         if (intersects.length > 0) {
             const p = intersects[0].point;
             let text = `Hit: ${intersects[0].object.name} @ (${p.x.toFixed(2)}, ${p.y.toFixed(2)}, ${p.z.toFixed(2)})`;
-
-            if (this.measureStart) {
-                const dist = this.measureStart.distanceTo(p);
-                // Detect Click vs Drag
-                if (dist > 0.05) {
-                    text += `\nDist: ${dist.toFixed(4)}`;
-                    console.log(`Measured: ${dist.toFixed(4)}m from ${this.measureStartName} to ${intersects[0].object.name}`);
-                }
-            }
-
-            this.lastClickPos = text;
             console.log(text);
         }
     }
@@ -267,11 +365,12 @@ export class LabScene {
 
         // HERO Particle
         const heroGeo = new THREE.SphereGeometry(0.15, 16, 16);
-        const heroMat = new THREE.MeshBasicMaterial({ color: 0x00ffff, transparent: true, opacity: 0.9, depthTest: true });
+        const heroMat = new THREE.MeshBasicMaterial({ color: 0x00ffff, transparent: true, opacity: 0.9, depthTest: false }); // No Depth Test to see through casing
         this.heroParticle = new THREE.Mesh(heroGeo, heroMat);
-        // this.heroParticle.renderOrder = 999; // REMOVED: Allow Z-Buffering for occlusion
-        // this.atmosphereGroup.add(this.heroParticle); // OLD
-        this.scene.add(this.heroParticle); // NEW: Independent control
+        this.heroParticle.renderOrder = 999;
+
+        // Attach to Scene initially, but re-parent to Engine in scenarios
+        this.scene.add(this.heroParticle);
         this.scene.add(this.atmosphereGroup);
     }
 
@@ -370,8 +469,8 @@ export class LabScene {
         const DEFAULT_CAM = new THREE.Vector3(8.1, 3.3, 15.6);
 
         // Global Component Isolation
-        this.isolateComponent(["Intake", "Nacelle", "Inlet"]);
-        this.nacelle.rotation.y = 0;
+        this.isolateComponent(["Intake", "Inlet"]);
+        if (this.nacelle) this.nacelle.visible = false;
 
         // Apply default cam first (Scenes 1-3)
         this.camera.position.copy(DEFAULT_CAM);
@@ -397,7 +496,7 @@ export class LabScene {
 
         // 3. Problem with Fast Air (Scene 3)
         if (index === 2) {
-            this.isolateComponent(["Intake", "Nacelle", "Inlet"]);
+            this.isolateComponent(["Intake", "Inlet"]);
             this.flowParticles.visible = true;
             // Uses Default Cam (8.1, 3.3, 15.6)
             this.updateTextContent("Scene 3 — The Problem with Fast Air", "Outside, air is fast, turbulent, chaotic.<br/>Compressors can’t work with chaos.", "NEXT");
@@ -405,7 +504,7 @@ export class LabScene {
 
         // 4. What Intake Does (Scene 4)
         if (index === 3) {
-            this.isolateComponent(["Intake", "Nacelle", "Inlet"]);
+            this.isolateComponent(["Intake", "Inlet"]);
             this.camera.position.set(-2.7, 1.2, -4.6); // USER COORD
             this.flowParticles.visible = true;
             this.updateTextContent("Scene 4 — What the Intake Does", "The air is not accelerated. It is slowed down.<br/>Smoothly. Gradually.", "NEXT");
@@ -413,7 +512,7 @@ export class LabScene {
 
         // 5. The Trade (Scene 5)
         if (index === 4) {
-            this.isolateComponent(["Intake", "Nacelle", "Inlet"]);
+            this.isolateComponent(["Intake", "Inlet"]);
             this.camera.position.set(-5.3, -0.3, -5.7); // USER COORD
             this.flowParticles.visible = true;
             this.updateTextContent("Scene 5 — The Trade", "When speed goes down... Pressure increases.<br/>No moving parts. Just physics.", "NEXT");
@@ -421,7 +520,7 @@ export class LabScene {
 
         // 6. Flow Control (Scene 6)
         if (index === 5) {
-            this.isolateComponent(["Intake", "Nacelle", "Inlet"]);
+            this.isolateComponent(["Intake", "Inlet"]);
             this.camera.position.set(-4.4, 0.5, -4.4); // USER COORD
             this.flowParticles.visible = true;
             this.updateTextContent("Scene 6 — Flow Control", "The airflow must be Straight, Even, Uniform.<br/>No swirls. No separation.", "NEXT");
@@ -429,7 +528,7 @@ export class LabScene {
 
         // 7. Why This Matters (Scene 7)
         if (index === 6) {
-            this.isolateComponent(["Intake", "Nacelle", "Inlet"]);
+            this.isolateComponent(["Intake", "Inlet"]);
             this.camera.position.set(-4.4, 0.5, -4.4); // USER COORD
             this.flowParticles.visible = true;
             this.updateTextContent("Scene 7 — Why This Matters", "If intake fails: Compressor stall. Engine surge.<br/>The intake is silent but protects everything.", "NEXT");
@@ -437,7 +536,7 @@ export class LabScene {
 
         // 8. True Purpose (Scene 8)
         if (index === 7) {
-            this.isolateComponent(["Intake", "Nacelle", "Inlet"]);
+            this.isolateComponent(["Intake", "Inlet"]);
             this.camera.position.set(-4.4, 0.5, -4.4); // USER COORD
             this.flowParticles.visible = true;
             this.updateTextContent("Scene 8 — The Intake’s True Purpose", "It is a translator.<br/>Takes fast, chaotic air and turns it into calm, pressurized flow.", "NEXT");
@@ -445,7 +544,7 @@ export class LabScene {
 
         // 9. The Question (Scene 9)
         if (index === 8) {
-            this.isolateComponent(["Intake", "Nacelle", "Inlet"]);
+            this.isolateComponent(["Intake", "Inlet"]);
             this.camera.position.set(-4.4, 0.5, -4.4); // USER COORD
             this.updateTextContent("Scene 9 — The Question", "Once the air is calm... What happens next?<br/>", "FINISH");
         }
@@ -465,35 +564,26 @@ export class LabScene {
         this.controls.enableRotate = true;
         this.controls.enablePan = true;
 
-        // FIXED CAM ANGLE
-        this.camera.position.set(-6.5, 1.8, 0.3);
-        this.controls.target.set(3, 0, 0);
-
+        // Isolate Compressor
         this.isolateComponent(["Compressor", "Shaft", "Spinner"]);
+
+        // RE-PARENT HERO TO ENGINE
+        this.engine.attach(this.heroParticle);
 
         // Hide Casing to show inner blades (User Request)
         const casing = this.engine.getObjectByName("CompressorCasing");
         if (casing) casing.visible = false;
 
         // --- HERO STATE LOGIC ---
-        // Scene 1: Intake Face (0.00m)
         if (index === 0) this.heroState.phase = "idle";
-
-        // Scene 2: First Blade (0.10m inside -> Z=1.20)
         if (index === 1) this.heroState.phase = "stage1";
-
-        // Scene 3: Whirl through LPC
         if (index === 2) {
             this.heroState.phase = "lpc_transit";
-            this.heroState.stageIndex = 1; // Start moving to Stator 1 (next after Rotor 1)
+            this.heroState.stageIndex = 1;
             this.heroState.spinProgress = 0;
         }
-
-        // Scene 4: Move to HPC and continue
         if (index === 3) {
-            this.heroState.phase = "hpc_transit";
-            this.heroState.stageIndex = 0;
-            this.heroState.spinProgress = 0;
+            this.heroState.phase = "lpc_transit"; // Continue transit
         }
 
         // Scene 9: Enter HPC (Keep existing flow for later scenes)
@@ -507,56 +597,80 @@ export class LabScene {
 
         // 1. Entering (Scene 1) - Index 0
         if (index === 0) {
+            this.camera.position.set(-2.0, 0.5, 2.0); // Look at Face
+            this.controls.target.set(0, 0, 1.1); // Intake Hub
             this.updateTextContent("Scene 1 — Entering the Core", "Now you meet the blades.<br/>Not one. Not two.<br/>Rows of them.<br/><br/>Spinning. Precise. Unforgiving.<br/>This is where the real work begins.", "NEXT");
         }
 
         // 2. First Contact
         if (index === 1) {
+            this.camera.position.set(-1.5, 0.8, 1.5); // Closer
+            this.controls.target.set(0, 0, 1.3);
             this.updateTextContent("Scene 2 — First Contact", "The first row hits you.<br/>You are squeezed.<br/>Not violently. Deliberately.<br/>Your path bends. Your speed changes.<br/>You survive — and move forward.", "NEXT");
         }
 
         // 3. Repetition
         if (index === 2) {
+            this.camera.position.set(-6, 2, 2.5); // Wide Side View for LPC
+            this.controls.target.set(0, 0, 2.0);
             this.updateTextContent("Scene 3 — Repetition Is Power", "Then it happens again.<br/>And again. And again.<br/>Stage after stage.<br/>Each row: Adds energy, Increases pressure, Controls direction.<br/>No randomness allowed.", "NEXT");
         }
 
         // 4. Myth
         if (index === 3) {
+            this.camera.position.set(-4, 0.5, 3.0); // Side level
+            this.controls.target.set(0, 0, 2.5);
             this.updateTextContent("Scene 4 — Clearing the Myth", "Important clarification.<br/>The compressor does not exist to just speed up air.<br/>That would be useless.<br/>Instead… It stores energy inside the air.<br/>Not as motion. But as pressure.", "NEXT");
         }
 
         // 5. Moving vs Compressing
         if (index === 4) {
+            this.camera.position.set(-3, 3, 3); // Top Down angle
+            this.controls.target.set(0, 0, 3.0);
             this.updateTextContent("Scene 5 — Moving vs Compressing", "Here’s the problem.<br/>Air must keep moving forward…<br/>But compression needs resistance.<br/>Too much motion — break.<br/>Too little — no compression.<br/>The compressor walks a knife edge.", "NEXT");
         }
 
         // 6. Speed Trap
         if (index === 5) {
+            this.camera.position.set(-2, 1, 2.0); // Front angle for stall
+            this.controls.target.set(0, 0, 2.0);
+            this.heroState.phase = "stall"; // VISUAL OVERRIDE
             this.updateTextContent("Scene 6 — The Speed Trap", "If air moves too fast:<br/>Flow separates. Turbulence forms. Compression collapses.<br/>This leads to instability.<br/>Engines hate instability.", "NEXT");
         }
 
         // 7. Slow Failure
         if (index === 6) {
+            this.camera.position.set(-5, 1, 3.0); // Side view
+            this.heroState.phase = "low_speed"; // VISUAL OVERRIDE
             this.updateTextContent("Scene 7 — The Cost of Slow", "If air moves too slow:<br/>Blades lose effectiveness. Pressure rise disappears.<br/>No pressure means no power.<br/>Balance is everything.", "NEXT");
         }
 
         // 8. Engineering Balance
         if (index === 7) {
+            this.camera.position.set(-8, 4, 3.5); // Far out overview
+            this.controls.target.set(0, 0, 3.5);
             this.updateTextContent("Scene 8 — Engineering the Balance", "Blade angles matter.<br/>Rotation speed matters.<br/>Mass flow rate matters.<br/>Change one — and the entire system reacts.<br/>Nothing here is accidental.", "NEXT");
         }
 
         // 9. Controlled Direction
         if (index === 8) {
+            this.camera.position.set(-3, 1.5, 4.0); // HPC Entry
+            this.controls.target.set(0, 0, 4.0);
+            this.heroState.phase = "hpc_transit"; // Back to flow
             this.updateTextContent("Scene 9 — Controlled Direction", "The blades don’t just squeeze you.<br/>They guide you.<br/>Each stage straightens the flow, prepares it, and hands it off.<br/>Like passing a fragile object — without dropping it.", "NEXT");
         }
 
         // 10. Result
         if (index === 9) {
+            this.camera.position.set(-2, 1.0, 5.5); // HPC Exit
+            this.controls.target.set(0, 0, 5.0);
             this.updateTextContent("Scene 10 — The Result", "By the time you exit:<br/>You are hotter.<br/>You are denser.<br/>You are highly pressurized.<br/>But still… You haven’t produced thrust. Not yet.", "NEXT");
         }
 
         // 11. Setup
         if (index === 10) {
+            this.camera.position.set(0, 0.5, 7.0); // Looking back from Combustor
+            this.controls.target.set(0, 0, 5.0);
             this.updateTextContent("Scene 11 — The Setup", "You are now perfect fuel for the next step.<br/>Calm. Packed with energy. Ready to release it.<br/>This is where heat enters the story.<br/>➡️ Next: Combustion", "FINISH");
         }
     }
@@ -922,29 +1036,20 @@ export class LabScene {
 
     createTextWidget() {
         this.textWidget = document.createElement('div');
-        Object.assign(this.textWidget.style, {
-            position: 'absolute', bottom: '30px', left: '30px', transform: 'none',
-            padding: '15px 25px', background: 'rgba(255, 255, 255, 0.08)', backdropFilter: 'blur(12px)',
-            border: '1px solid rgba(255, 255, 255, 0.15)', borderRadius: '16px', color: '#e2e8f0',
-            fontFamily: "'Inter', sans-serif", fontSize: '1rem', lineHeight: '1.6',
-            boxShadow: '0 8px 32px rgba(0, 0, 0, 0.3)',
-            // EXACT FIT CONTENT
-            maxWidth: 'min(500px, 90vw)', width: 'fit-content',
-            textAlign: 'left', transition: 'all 0.3s ease', zIndex: '100'
-        });
+        this.textWidget.className = "lab-text-widget"; // Uses injected CSS
+
         this.textTitle = document.createElement('div');
-        this.textTitle.style.cssText = "font-size: 0.85rem; text-transform: uppercase; color: #718096; letter-spacing: 2px; margin-bottom: 8px; font-weight: 700;";
+        this.textTitle.className = "lab-text-title";
         this.textWidget.appendChild(this.textTitle);
+
         this.textBody = document.createElement('div');
-        this.textBody.style.cssText = "font-weight: 400; font-size: 1.15rem; color: #ffffff; margin-bottom: 20px;";
+        this.textBody.className = "lab-text-body";
         this.textWidget.appendChild(this.textBody);
+
         this.continueBtn = document.createElement('button');
-        Object.assign(this.continueBtn.style, {
-            padding: "10px 25px", background: "#3182ce", color: "white", border: "none", borderRadius: "50px",
-            fontSize: "0.9rem", fontWeight: "600", cursor: "pointer", letterSpacing: "1px", transition: "transform 0.2s"
-        });
+        this.continueBtn.className = "lab-continue-btn";
+
         this.continueBtn.onclick = () => {
-            // Logic based on scenario
             // Logic based on scenario
             let max = 2;
             if (this.scenario === "intake") max = 8;
@@ -969,6 +1074,8 @@ export class LabScene {
         this.textWidget.appendChild(this.continueBtn);
         this.container.appendChild(this.textWidget);
     }
+
+    // updateMobileLayout removed - handled by CSS
 
     createDebugWidget() {
         this.debugWidget = document.createElement('div');
@@ -999,7 +1106,20 @@ export class LabScene {
         if (!this.camera || !this.renderer) return;
         const width = this.container.clientWidth;
         const height = this.container.clientHeight;
-        this.camera.aspect = width / height;
+        const aspect = width / height;
+
+        // Smart FOV: Maintain Horizontal FOV on Portrait to fit Engine
+        // Standard Vertical FOV = 60 deg
+        if (aspect < 1.0) {
+            // Portrait Mode: Increase Vertical FOV to keep Horizontal FOV wide enough
+            // Formula: fov = base / aspect. 
+            // Clamp aspect to roughly 0.5 (9:16) to prevent extreme fisheye
+            this.camera.fov = 65 / Math.max(0.55, aspect);
+        } else {
+            this.camera.fov = 60;
+        }
+
+        this.camera.aspect = aspect;
         this.camera.updateProjectionMatrix();
         this.renderer.setSize(width, height);
         this.composer.setSize(width, height);
@@ -1101,11 +1221,32 @@ export class LabScene {
                     this.heroParticle.position.z -= 10.0 * dt;
                     if (this.heroParticle.position.z < -2) this.heroParticle.visible = false;
                 }
-                this.engine.traverse(obj => { if (obj.name === "Compressor" && obj.rotation) obj.rotation.x += 30 * dt; });
+
+                // COMPONENT-BASED UPDATE SCHEME (Replicates Simulation Lab)
+                this.engine.traverse(obj => {
+                    // Set RPM for visualization (Scene 1: Fast Flyby)
+                    if (obj.name === "Compressor" || obj.name === "Turbine") {
+                        obj.params = obj.params || {};
+                        obj.params.rpm = 2000; // Visual RPM
+                    }
+                    if (typeof obj.update === "function") {
+                        obj.update(dt, this.physics);
+                    }
+                });
             }
         }
         if (this.currentScene === 2) {
-            this.engine.traverse(obj => { if (obj.name === "Compressor" && obj.rotation) obj.rotation.x += 10 * dt; });
+            // COMPONENT-BASED UPDATE SCHEME (Replicates Simulation Lab)
+            this.engine.traverse(obj => {
+                // Set RPM for visualization (Scene 2: Slow Internal View)
+                if (obj.name === "Compressor" || obj.name === "Turbine") {
+                    obj.params = obj.params || {};
+                    obj.params.rpm = 800; // Slow Visual RPM
+                }
+                if (typeof obj.update === "function") {
+                    obj.update(dt, this.physics);
+                }
+            });
             if (this.heroParticle) this.heroParticle.scale.setScalar(0.5 + Math.sin(this.sceneTime * 8) * 0.1);
         }
     }
@@ -1124,99 +1265,108 @@ export class LabScene {
 
             // Color Update
             if (isPressure) {
-                this.flowParticles.material.color.setHex(0xff9999); // Reddish
+                this.flowParticles.material.color.setHex(0xff9999); // Reddish (Pressure)
             } else {
-                this.flowParticles.material.color.setHex(0xaaccff); // Blueish
+                this.flowParticles.material.color.setHex(0xaaccff); // Blueish (Air)
             }
 
             for (let i = 0; i < configs.length; i++) {
                 let ix = i * 3;
+
+                // AXIAL IS X. (Matches Compressor/Combustor/Nozzle)
 
                 // Movement
                 let speed = configs[i].speed;
                 if (isSlowing) speed *= 0.5;
                 if (isPressure) speed *= 0.2; // Very slow
 
-                // Default Direction: -Z (Front to Back)
-                let dir = -1;
-                positions[ix + 2] += speed * dir * dt;
+                // Direction: +X (Front to Back)
+                // Intake Zone: roughly -4.0 to 1.0 (Compressor face)
+                positions[ix] += speed * dt;
 
                 // Wrapping
-                if (positions[ix + 2] < -5) {
-                    positions[ix + 2] = 10;
+                // Extend visual flow past compressor face (X=1.1) to avoid premature popping
+                // Reset to Front (X=-4.0)
+                if (positions[ix] > 2.5) {
+                    positions[ix] = -4.0;
+
                     if (isStraight) {
+                        // Grid Spawn
                         const row = (i % 10) - 5;
                         const col = (Math.floor(i / 10) % 10) - 5;
-                        positions[ix] = row * 0.3;
-                        positions[ix + 1] = col * 0.3;
+                        positions[ix + 1] = row * 0.2; // Y
+                        positions[ix + 2] = col * 0.2; // Z
                     } else if (isSlowing || isPressure) {
-                        // Spawn in a circle/cylinder
-                        const r = Math.sqrt(Math.random()) * 1.0; // Radius 1.0
+                        // Circle Spawn
+                        const r = Math.sqrt(Math.random()) * 0.8;
                         const theta = Math.random() * 2 * Math.PI;
-                        positions[ix] = r * Math.cos(theta);
-                        positions[ix + 1] = r * Math.sin(theta);
+                        positions[ix + 1] = r * Math.cos(theta); // Y
+                        positions[ix + 2] = r * Math.sin(theta); // Z
                     } else {
-                        positions[ix] = (Math.random() - 0.5) * 5;
-                        positions[ix + 1] = (Math.random() - 0.5) * 5;
+                        // Random Box for "Chaotic" Scene 2
+                        positions[ix + 1] = (Math.random() - 0.5) * 2.0; // Y (Reduced from 3.0)
+                        positions[ix + 2] = (Math.random() - 0.5) * 2.0; // Z
                     }
                 }
 
-                // Behaviors
+                // Behaviors (XY is Cross Section)
                 if (isChaotic) {
-                    positions[ix] += (Math.random() - 0.5) * 8 * dt;
-                    positions[ix + 1] += (Math.random() - 0.5) * 8 * dt;
+                    positions[ix + 1] += (Math.random() - 0.5) * 5 * dt; // Y
+                    positions[ix + 2] += (Math.random() - 0.5) * 5 * dt; // Z
+
+                    // RADIAL CLAMP (Prevent Leaking through walls)
+                    // Intake Radius approx 1.0 - 1.2
+                    const y = positions[ix + 1];
+                    const z = positions[ix + 2];
+                    const r = Math.sqrt(y * y + z * z);
+                    if (r > 1.2) {
+                        const scale = 1.1 / r;
+                        positions[ix + 1] *= scale;
+                        positions[ix + 2] *= scale;
+                    }
                 }
                 else if (isSlowing || isPressure) {
-                    // BEAM LOGIC: Constrain to cylinder, don't collapse to 0
-                    // Move towards a radius of ~0.8 (slightly compressed)
-                    // But keep some minimal random motion to look like "flow"
-                    const x = positions[ix];
+                    // BEAM LOGIC: Constrain to cylinder
                     const y = positions[ix + 1];
-                    const currentR = Math.sqrt(x * x + y * y);
+                    const z = positions[ix + 2];
+                    const currentR = Math.sqrt(y * y + z * z);
 
                     if (currentR > 1.2) {
                         // Compress outer particles in
-                        positions[ix] *= 0.95;
                         positions[ix + 1] *= 0.95;
-                    }
-                    else if (currentR < 0.2) {
-                        // Don't let them all bunch in center perfectly
-                        // positions[ix] *= 1.01; 
-                        // positions[ix+1] *= 1.01;
+                        positions[ix + 2] *= 0.95;
                     }
 
-                    // Add slight "beam" jitter but keep within bounds
-                    positions[ix] += (Math.random() - 0.5) * 0.5 * dt;
-                    positions[ix + 1] += (Math.random() - 0.5) * 0.5 * dt;
+                    // Add slight "beam" jitter
+                    positions[ix + 1] += (Math.random() - 0.5) * 0.2 * dt;
+                    positions[ix + 2] += (Math.random() - 0.5) * 0.2 * dt;
                 }
                 else if (isStraight) {
                     // Force into grid
                     const row = (i % 10) - 5;
                     const col = (Math.floor(i / 10) % 10) - 5;
-                    const tx = row * 0.3;
-                    const ty = col * 0.3;
-                    positions[ix] += (tx - positions[ix]) * 5.0 * dt;
+                    const ty = row * 0.2;
+                    const tz = col * 0.2;
                     positions[ix + 1] += (ty - positions[ix + 1]) * 5.0 * dt;
+                    positions[ix + 2] += (tz - positions[ix + 2]) * 5.0 * dt;
                 }
-
-
                 else if (isTranslating) {
-                    // Z>2 Chaos, Z<2 Calm Beam
-                    if (positions[ix + 2] > 2) {
-                        positions[ix] += (Math.random() - 0.5) * 5 * dt;
-                        positions[ix + 1] += (Math.random() - 0.5) * 5 * dt;
+                    // X < -1 Chaos, X > -1 Calm Beam
+                    if (positions[ix] < -1.0) {
+                        positions[ix + 1] += (Math.random() - 0.5) * 4 * dt;
+                        positions[ix + 2] += (Math.random() - 0.5) * 4 * dt;
                     } else {
                         // BEAM LOGIC
-                        const x = positions[ix];
                         const y = positions[ix + 1];
-                        const currentR = Math.sqrt(x * x + y * y);
+                        const z = positions[ix + 2];
+                        const currentR = Math.sqrt(y * y + z * z);
 
-                        if (currentR > 1.2) {
-                            positions[ix] *= 0.95;
+                        if (currentR > 1.0) {
                             positions[ix + 1] *= 0.95;
+                            positions[ix + 2] *= 0.95;
                         }
-                        positions[ix] += (Math.random() - 0.5) * 0.5 * dt;
-                        positions[ix + 1] += (Math.random() - 0.5) * 0.5 * dt;
+                        positions[ix + 1] += (Math.random() - 0.5) * 0.2 * dt;
+                        positions[ix + 2] += (Math.random() - 0.5) * 0.2 * dt;
                     }
                 }
             }
@@ -1224,6 +1374,7 @@ export class LabScene {
         }
 
         if (this.heroParticle && this.currentScene === 0) {
+            // Idle hover
             this.heroParticle.position.y = Math.sin(this.sceneTime) * 0.2;
         }
     }
@@ -1571,11 +1722,225 @@ export class LabScene {
     }
 
     animateCompressor(dt) {
-        // Spin the compressor blades (Rotors vs Stators)
-        // Rotors (Moving): Spinner, Shaft, Rotor, Blade, Fan
-        // Stators (Static): Stator, Vane, Case
+        // --- 1. ROTOR VISUALS (Component Update Pattern) ---
+        // Ensure we have a valid RPM for visualization
+        let targetRPM = 5000; // Default base speed
+        if (this.physics && this.physics.state) {
+            // If physics is running, use real RPM, else use base for idle spin
+            if (this.physics.state.rpm > 100) targetRPM = this.physics.state.rpm;
+        }
 
-        // 1. DYNAMIC ROTATION SPEED
+        this.engine.traverse(obj => {
+            // Set RPM
+            if (obj.name === "Compressor" || obj.name === "Turbine") {
+                obj.params = obj.params || {};
+                obj.params.rpm = targetRPM;
+            }
+            // Update Physics/Transform
+            if (typeof obj.update === "function") {
+                obj.update(dt, this.physics);
+            }
+        });
+
+        // --- 2. ENSURE PARENTING (One-Time Fix) ---
+        if (this.flowParticles && this.flowParticles.parent !== this.engine) {
+            this.scene.remove(this.flowParticles);
+            this.engine.add(this.flowParticles);
+            // Reset transform to identity so it sits in Engine Local Space
+            this.flowParticles.position.set(0, 0, 0);
+            this.flowParticles.rotation.set(0, 0, 0);
+            this.flowParticles.scale.set(1, 1, 1);
+        }
+        if (this.heroParticle && this.heroParticle.parent !== this.engine) {
+            this.scene.remove(this.heroParticle);
+            this.engine.add(this.heroParticle);
+            // Reset
+            this.heroParticle.position.set(0, 0, 0);
+            this.heroParticle.rotation.set(0, 0, 0);
+            this.heroParticle.scale.set(1, 1, 1);
+        }
+
+        // --- 3. BACKGROUND FLOW (Physics Linked) ---
+        if (this.flowParticles && this.flowParticles.visible) {
+            const positions = this.flowParticles.geometry.attributes.position.array;
+            const colors = this.flowParticles.geometry.attributes.color.array;
+            const configs = this.flowParticles.userData.config;
+
+            for (let i = 0; i < configs.length; i++) {
+                let ix = i * 3;
+                let x = positions[ix]; // AXIAL IS LOCAL X NOW
+                // Y, Z are Radial
+
+                // Continuous Flow Loop
+                if (x > 7.0 || x < -2.0) {
+                    x = -0.5; // Start at intake
+                    positions[ix] = x;
+                    const r = 0.5 + Math.random() * 0.4; // Random Radius
+                    const theta = Math.random() * 2 * Math.PI;
+                    positions[ix + 1] = r * Math.cos(theta); // Y
+                    positions[ix + 2] = r * Math.sin(theta); // Z
+                    // Color Reset (Blue)
+                    colors[ix] = 0.1; colors[ix + 1] = 0.3; colors[ix + 2] = 1.0;
+                    continue;
+                }
+
+                // Move Logic
+                let flowScalar = 0.0;
+                // Use targetRPM (visual speed) instead of physics state, as physics might be idle in this module
+                flowScalar = targetRPM / 100.0;
+                if (flowScalar < 0.01) flowScalar = 0;
+
+                // Speed varies by stage for visual effect
+                let speed = 3.0 + Math.random();
+                if (x > 3.0) speed = 2.0; // Slow in HPC
+
+                x += speed * dt * flowScalar * 5.0; // Scale up speed
+                positions[ix] = x;
+
+                // Simple Constraints (Radius)
+                // Linear Taper: 1.1 -> 5.5
+                const t = Math.max(0, Math.min(1, (x - 1.1) / (4.4)));
+                const rCase = 1.0 - t * 0.15;
+                const rHub = 0.35 + t * 0.45;
+
+                // Color (Heat)
+                let heat = 0;
+                if (x > 1.1) heat = Math.min(t * flowScalar * 1.5, 1.0);
+                colors[ix] = heat; colors[ix + 1] = 0; colors[ix + 2] = 1 - heat;
+
+                // Radial Fix (Keep in Annulus)
+                let py = positions[ix + 1];
+                let pz = positions[ix + 2];
+                let rCurrent = Math.sqrt(py * py + pz * pz);
+                let theta = Math.atan2(pz, py);
+
+                // Swirl
+                theta += 15.0 * dt * flowScalar;
+
+                if (rCurrent < rHub) rCurrent = rHub + 0.05;
+                if (rCurrent > rCase) rCurrent = rCase - 0.05;
+
+                positions[ix + 1] = rCurrent * Math.cos(theta); // Y
+                positions[ix + 2] = rCurrent * Math.sin(theta); // Z
+            }
+            this.flowParticles.geometry.attributes.position.needsUpdate = true;
+            this.flowParticles.geometry.attributes.color.needsUpdate = true;
+        }
+
+        // --- 4. HERO PARTICLE LOGIC (Detailed Scenes) ---
+        // Parented to Engine -> Local Coordinates (X=Axial)
+        if (!this.heroParticle || !this.heroParticle.visible) return;
+
+        const s = this.heroState;
+        const pos = this.heroParticle.position;
+
+        // AXIAL ZONES (Local X)
+        const X_ENTRY = 1.1;
+        const X_LPC_END = 3.0;
+        const X_HPC_START = 3.2;
+        const X_EXIT = 5.5;
+
+        // Defaults
+        let targetX = pos.x;
+        let targetR = 0.8;
+        let spinRate = 0.0;
+        let colorHex = null; // If null, use Heat HSL
+
+        // Phase Logic
+        if (s.phase === "idle") {
+            // Scene 1: Hover at Face
+            targetX = X_ENTRY - 0.5;
+            spinRate = 0.5;
+            targetR = 0.8;
+            colorHex = 0x00ffff; // Cyan
+            pos.x += (targetX - pos.x) * 2.0 * dt;
+        }
+        else if (s.phase === "stage1") {
+            // Scene 2: Squeeze
+            targetX = X_ENTRY + 0.2;
+            if (pos.x < targetX) pos.x += 1.5 * dt;
+            spinRate = 5.0;
+            targetR = 0.75;
+            colorHex = 0x0088ff; // Blue-ish
+            // Shake
+            targetR += Math.sin(Date.now() / 50) * 0.02;
+        }
+        else if (s.phase === "lpc_transit") {
+            // Scene 3-5: LPC Transit
+            // Move X 1.3 -> 3.0
+            if (pos.x < X_LPC_END) pos.x += 1.5 * dt;
+            else pos.x = X_ENTRY + 0.5; // Loop
+
+            spinRate = 8.0;
+            // Radius Reduce
+            const p = (pos.x - X_ENTRY) / (X_LPC_END - X_ENTRY);
+            targetR = 0.75 - p * 0.15;
+
+            // Heat
+            this.heroParticle.material.color.setHSL(0.6 - p * 0.2, 1.0, 0.5);
+            colorHex = -1; // Skip override
+        }
+        else if (s.phase === "stall") {
+            // Scene 6: Stall
+            // Shake & Backflow
+            pos.y += (Math.random() - 0.5) * 0.1;
+            pos.z += (Math.random() - 0.5) * 0.1;
+            pos.x -= 1.0 * dt; // BACKWARDS FLOW
+            if (pos.x < 0.5) pos.x = 2.0;
+
+            colorHex = 0xffaa00; // Warning Orange
+        }
+        else if (s.phase === "low_speed") {
+            // Scene 7: Low Speed
+            // Drift Forward slowly
+            pos.x += 0.2 * dt;
+            if (pos.x > 3.0) pos.x = 1.0;
+            spinRate = 1.0; // Slow spin
+            colorHex = 0xaaaaaa; // Gray
+        }
+        else if (s.phase === "hpc" || s.phase === "hpc_transit") {
+            // Scene 8-10: HPC
+            // Fast X 3.2 -> 5.5
+            if (pos.x < X_HPC_START) pos.x = X_HPC_START;
+
+            pos.x += 3.0 * dt;
+            if (pos.x > X_EXIT) pos.x = X_HPC_START; // Loop
+
+            spinRate = 15.0;
+            targetR = 0.6;
+
+            // Heat Red
+            const p = (pos.x - X_HPC_START) / (X_EXIT - X_HPC_START);
+            this.heroParticle.material.color.setHSL(0.1 - p * 0.1, 1.0, 0.5); // Orange->Red
+            colorHex = -1;
+        }
+        else if (s.phase === "exit") {
+            // Scene 11: Exit
+            pos.x += 8.0 * dt;
+            colorHex = 0xff0000; // HOT
+        }
+
+        // Apply Spin & Radius
+        s.theta += spinRate * dt;
+        // Smooth Radius transition
+        const currentR = Math.sqrt(pos.y * pos.y + pos.z * pos.z) || targetR;
+        const newR = currentR + (targetR - currentR) * 5.0 * dt;
+
+        pos.y = newR * Math.cos(s.theta);
+        pos.z = newR * Math.sin(s.theta);
+
+        // Apply Color if override
+        if (colorHex !== null && colorHex !== -1) {
+            this.heroParticle.material.color.setHex(colorHex);
+        }
+    }
+
+    animateCompressor_Legacy(dt) {
+        // --- 1. ROTOR VISUALS (Always Spin) ---
+        // Increase speed for visibility
+        const baseSpeed = 5.0;
+
+        // Dynamic Speed from Physics if valid
         let rpm = 0;
         if (this.physics && this.physics.state) {
             rpm = this.physics.state.rpm;
@@ -1583,17 +1948,16 @@ export class LabScene {
         // Visual Scaling: 100% RPM = ~60 rad/s
         const rotSpeed = (rpm / 100.0) * 60.0;
 
+        const finalSpeed = baseSpeed + rotSpeed;
+
         this.engine.traverse(obj => {
             const name = obj.name.toLowerCase();
-            // Core rotating parts
-            if (name === "spinner" || name === "shaft") {
-                if (obj.rotation) obj.rotation.x += rotSpeed * dt;
-            }
-            // Compressor parts: Check if it's a rotor or generic blade not explicitly a stator
-            else if (obj.parent && obj.parent.name === "Compressor") {
-                if (!name.includes("stator") && !name.includes("vane") && !name.includes("case")) {
-                    if (obj.rotation) obj.rotation.x += rotSpeed * dt;
-                }
+            // Spin anything that looks like a rotor part
+            const isRotor = name.includes("rotor") || name.includes("blade") || name.includes("fan") || name === "mainrotorhub" || name === "shaft" || name === "spinner";
+            const isStator = name.includes("stator") || name.includes("vane") || name.includes("case") || name.includes("casing");
+
+            if (isRotor && !isStator) {
+                if (obj.rotation) obj.rotation.x += finalSpeed * dt;
             }
         });
 

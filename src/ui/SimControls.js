@@ -15,12 +15,16 @@ export class SimControls {
     initUI() {
         this.panel = document.createElement('div');
         this.panel.style.position = 'absolute';
-        this.panel.style.bottom = '20px';
+        this.panel.style.bottom = 'max(30px, env(safe-area-inset-bottom))'; // Safe area fix
         this.panel.style.left = '50%';
         this.panel.style.transform = 'translateX(-50%)';
         this.panel.style.display = 'flex';
-        this.panel.style.gap = '15px';
-        this.panel.style.padding = '15px 25px';
+        this.panel.style.flexWrap = 'wrap'; // Allow wrapping
+        this.panel.style.justifyContent = 'center';
+        this.panel.style.gap = '10px'; // Reduced gap
+        this.panel.style.padding = '10px 15px'; // Compact padding
+        this.panel.style.width = 'max-content';
+        this.panel.style.maxWidth = '90vw'; // Prevent overflow off screen
         this.panel.style.background = 'rgba(0, 0, 0, 0.6)';
         this.panel.style.backdropFilter = 'blur(10px)';
         this.panel.style.borderRadius = '30px';
